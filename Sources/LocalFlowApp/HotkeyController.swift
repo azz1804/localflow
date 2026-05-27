@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import Foundation
+import IOKit.hid
 
 struct HotkeySpec: Equatable {
     enum Key: Equatable {
@@ -208,13 +209,16 @@ final class HotkeyController {
     private var localMonitor: Any?
     private var carbonEventHandler: EventHandlerRef?
     private var carbonHotkeys: [UInt32: EventHotKeyRef] = [:]
+    private var hidManager: IOHIDManager?
     private var fnIsDown = false
+    private var hidFnIsDown = false
     private var holdFallbackIsDown = false
     private var lastToggleTime: CFTimeInterval = 0
     private(set) var isRunning = false
     private(set) var activeTapDescription = "none"
     private(set) var monitorsAreInstalled = false
     private(set) var carbonHotkeysAreRegistered = false
+    private(set) var hidListenerIsRunning = false
 
     init(holdHotkey: String, fallbackHoldHotkey: String, toggleHotkey: String) {
         self.holdSpec = HotkeySpec.parse(holdHotkey)
@@ -228,6 +232,7 @@ final class HotkeyController {
 
         installCarbonHotkeys()
         installNSEventMonitors()
+        installHIDListener()
 
         let eventMask =
             (1 << CGEventType.keyDown.rawValue)
@@ -269,7 +274,7 @@ final class HotkeyController {
         }
 
         guard let eventTap else {
-            isRunning = monitorsAreInstalled || carbonHotkeysAreRegistered
+            isRunning = monitorsAreInstalled || carbonHotkeysAreRegistered || hidListenerIsRunning
             activeTapDescription = "none"
             return isRunning
         }
@@ -297,6 +302,10 @@ final class HotkeyController {
         if let carbonEventHandler {
             RemoveEventHandler(carbonEventHandler)
         }
+        if let hidManager {
+            IOHIDManagerUnscheduleFromRunLoop(hidManager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            IOHIDManagerClose(hidManager, IOOptionBits(kIOHIDOptionsTypeNone))
+        }
 
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
@@ -312,11 +321,14 @@ final class HotkeyController {
         localMonitor = nil
         carbonEventHandler = nil
         carbonHotkeys = [:]
+        hidManager = nil
         isRunning = false
         monitorsAreInstalled = false
         carbonHotkeysAreRegistered = false
+        hidListenerIsRunning = false
         activeTapDescription = "none"
         fnIsDown = false
+        hidFnIsDown = false
         holdFallbackIsDown = false
         lastToggleTime = 0
     }
@@ -347,6 +359,62 @@ final class HotkeyController {
         }
 
         monitorsAreInstalled = globalMonitor != nil || localMonitor != nil
+    }
+
+    private func installHIDListener() {
+        guard holdSpec?.key == .fn else {
+            return
+        }
+
+        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let matches = [
+            Self.hidMatch(usagePage: kHIDPage_GenericDesktop, usage: kHIDUsage_GD_Keyboard),
+            Self.hidMatch(usagePage: Self.appleVendorUsagePage, usage: 3),
+            Self.hidMatch(usagePage: Self.appleVendorUsagePage, usage: 11),
+            Self.hidMatch(usagePage: Self.appleVendorUsagePage, usage: 13),
+            Self.hidMatch(usagePage: Self.appleVendorUsagePage, usage: 95)
+        ] as CFArray
+
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matches)
+
+        let callback: IOHIDValueCallback = { _, _, refcon, value in
+            guard let refcon else {
+                return
+            }
+
+            let element = IOHIDValueGetElement(value)
+            let usagePage = Int(IOHIDElementGetUsagePage(element))
+            let usage = Int(IOHIDElementGetUsage(element))
+            let intValue = IOHIDValueGetIntegerValue(value)
+            let controller = Unmanaged<HotkeyController>.fromOpaque(refcon).takeUnretainedValue()
+
+            Task { @MainActor in
+                controller.handleHIDValue(usagePage: usagePage, usage: usage, intValue: intValue)
+            }
+        }
+
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        IOHIDManagerRegisterInputValueCallback(manager, callback, refcon)
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+
+        let status = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        guard status == kIOReturnSuccess else {
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            LocalFlowLogger.log("HID listener failed status=\(status)")
+            hidListenerIsRunning = false
+            return
+        }
+
+        hidManager = manager
+        hidListenerIsRunning = true
+        LocalFlowLogger.log("HID listener started")
+    }
+
+    private static func hidMatch(usagePage: Int, usage: Int) -> CFDictionary {
+        [
+            kIOHIDDeviceUsagePageKey: usagePage,
+            kIOHIDDeviceUsageKey: usage
+        ] as CFDictionary
     }
 
     private func installCarbonHotkeys() {
@@ -421,6 +489,36 @@ final class HotkeyController {
         if status == noErr, let hotkeyRef {
             carbonHotkeys[id] = hotkeyRef
         }
+    }
+
+    private func handleHIDValue(usagePage: Int, usage: Int, intValue: Int) {
+        guard holdSpec?.key == .fn, Self.isFnHIDUsage(usagePage: usagePage, usage: usage) else {
+            return
+        }
+
+        let isDown = intValue != 0
+        guard isDown != hidFnIsDown else {
+            return
+        }
+
+        hidFnIsDown = isDown
+        if isDown {
+            startHold(source: "fn-hid")
+        } else {
+            endHold(source: "fn-hid")
+        }
+    }
+
+    private static func isFnHIDUsage(usagePage: Int, usage: Int) -> Bool {
+        if usagePage == kHIDPage_KeyboardOrKeypad {
+            return usage == keyboardFnUsage
+        }
+
+        if usagePage == appleVendorUsagePage {
+            return appleVendorFnUsages.contains(usage)
+        }
+
+        return false
     }
 
     private func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -662,6 +760,8 @@ final class HotkeyController {
             return "Fn via NSEvent flags"
         case "fn-nsevent-key":
             return "Fn via NSEvent key"
+        case "fn-hid":
+            return "Fn via HID"
         case "fallback-carbon":
             return "Option+Space via Carbon"
         case "fallback-cg-key":
@@ -682,4 +782,7 @@ final class HotkeyController {
     private static let carbonSignature: OSType = 0x4C464C57 // LFLW
     private static let carbonFallbackHoldID: UInt32 = 1
     private static let carbonToggleID: UInt32 = 2
+    private static let keyboardFnUsage = 0xE8
+    private static let appleVendorUsagePage = 0xFF00
+    private static let appleVendorFnUsages: Set<Int> = [3, 11, 13, 95]
 }

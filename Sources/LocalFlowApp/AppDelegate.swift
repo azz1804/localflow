@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateLastHotkey(event)
         }
         let started = hotkeyController.start()
-        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
+        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
 
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
@@ -225,7 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let tap = hotkeyController?.activeTapDescription ?? "none"
             let monitors = hotkeyController?.monitorsAreInstalled == true ? "+monitor" : ""
             let carbon = hotkeyController?.carbonHotkeysAreRegistered == true ? "+carbon" : ""
-            hotkeyStatusMenuItem.title = "Hotkeys: Active (\(tap)\(monitors)\(carbon))"
+            let hid = hotkeyController?.hidListenerIsRunning == true ? "+hid" : ""
+            hotkeyStatusMenuItem.title = "Hotkeys: Active (\(tap)\(monitors)\(carbon)\(hid))"
             hotkeyStatusMenuItem.action = #selector(retryHotkeys)
             hotkeyStatusMenuItem.isEnabled = false
         } else {
@@ -372,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
-        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
+        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
         refreshPermissionMenuState()
 
         if !started {

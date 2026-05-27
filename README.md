@@ -81,7 +81,7 @@ Menu bar items:
 - `Open LocalFlow`: opens the graphical interface.
 - `Reload .env and Dictionary`: reloads config, dictionary and hotkeys without rebuilding.
 - `Open Support Folder`: opens the runtime folder that contains `dictionary.json` and `history.jsonl`.
-- `Hotkeys: Active`: confirms the global keyboard hook is running.
+- `Hotkeys: Active`: confirms the global keyboard hooks are running. `+hid` means the low-level Fn/Globe listener is active.
 - `Last hotkey`: shows the latest real hotkey event LocalFlow received, including whether it came from `Fn` or `Option+Space`.
 - `Fn blocked - Enable Input Monitoring`: LocalFlow can run, but macOS is blocking the `Fn` listener.
 - `Hotkeys: Inactive - Retry`: retries installing the global keyboard hook.
@@ -159,7 +159,7 @@ Live transcription was not exercised here because no real `.env` with `OPENAI_AP
 - No text is pasted after transcription: check Accessibility permission.
 - Recording fails immediately: check Microphone permission.
 - `Fn` does nothing: enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`, then click `LF > Hotkeys: Inactive - Retry` or restart LocalFlow.
-- After pressing `Fn`, open the menu and check `Last hotkey`. If it still says `none`, macOS did not deliver the key event to LocalFlow.
+- After pressing `Fn`, open the menu and check `Last hotkey`. `Fn via HID` means LocalFlow caught it through the low-level listener; if it still says `none`, macOS did not deliver the key event to LocalFlow.
 - `Option+Space` does nothing: open `LF > Hotkeys...` and check `~/Library/Application Support/LocalFlow/localflow.log`.
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
