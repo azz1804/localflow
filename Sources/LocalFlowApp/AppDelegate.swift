@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setupMenuBar()
             setupControllers()
             refreshPermissionMenuState()
+            showMainWindow()
         } catch {
             setupMenuBar()
             showFatalError(error)
@@ -157,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Open LocalFlow", action: #selector(showSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "Open LocalFlow", action: #selector(showMainWindow), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
@@ -289,7 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         polishMenuItem.state = configuration.enablePolish ? .on : .off
     }
 
-    @objc private func showSettings() {
+    @objc private func showMainWindow() {
         let settingsWindowController = self.settingsWindowController ?? SettingsWindowController()
         configureSettingsWindowCallbacks(settingsWindowController)
         settingsWindowController.update(
@@ -301,7 +302,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             historyURL: historyURL,
             appSupportURL: appSupportURL
         )
+        settingsWindowController.selectHistoryTab()
         settingsWindowController.showWindow(nil)
+        settingsWindowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.settingsWindowController = settingsWindowController
     }
@@ -312,7 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationController?.updateConfiguration(configuration, dictionary: dictionary)
             restartHotkeys()
             polishMenuItem.state = configuration.enablePolish ? .on : .off
-            showSettings()
+            showMainWindow()
         } catch {
             floatingBarController?.update(status: .error(error.localizedDescription), level: 0)
         }

@@ -2,7 +2,7 @@ import AppKit
 import LocalFlowCore
 
 @MainActor
-final class SettingsWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+final class SettingsWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTabViewDelegate {
     var onSaveSettings: ((AppConfiguration) -> Result<Void, Error>)?
     var onSaveDictionary: ((PersonalDictionary) -> Result<Void, Error>)?
     var onClearHistory: (() -> Result<Void, Error>)?
@@ -37,6 +37,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private let historyTableView = NSTableView()
     private let historyDetailView = NSTextView()
     private let historyCountLabel = NSTextField(labelWithString: "")
+    private weak var historySplitView: NSSplitView?
 
     private let termsTextView = NSTextView()
     private let replacementsTextView = NSTextView()
@@ -97,10 +98,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             .map { "\($0.key) = \($0.value)" }
             .joined(separator: "\n")
 
-        historyTableView.reloadData()
-        historyCountLabel.stringValue = "\(historyRecords.count) records"
-        selectFirstHistoryRecord()
+        refreshHistoryDisplay()
         setStatus("")
+    }
+
+    func selectHistoryTab() {
+        tabView.selectTabViewItem(withIdentifier: Self.historyTabIdentifier)
+        refreshHistoryDisplay()
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -173,6 +177,14 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         updateHistoryDetail()
     }
 
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        guard tabViewItem?.identifier as? String == Self.historyTabIdentifier else {
+            return
+        }
+
+        refreshHistoryTableAfterLayout()
+    }
+
     private func buildInterface() {
         guard let contentView = window?.contentView else {
             return
@@ -185,9 +197,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
         tabView.translatesAutoresizingMaskIntoConstraints = false
-        tabView.addTabViewItem(tab(identifier: "settings", label: "Settings", view: buildSettingsTab()))
-        tabView.addTabViewItem(tab(identifier: "history", label: "History", view: buildHistoryTab()))
-        tabView.addTabViewItem(tab(identifier: "dictionary", label: "Dictionary", view: buildDictionaryTab()))
+        tabView.delegate = self
+        tabView.addTabViewItem(tab(identifier: Self.settingsTabIdentifier, label: "Settings", view: buildSettingsTab()))
+        tabView.addTabViewItem(tab(identifier: Self.historyTabIdentifier, label: "History", view: buildHistoryTab()))
+        tabView.addTabViewItem(tab(identifier: Self.dictionaryTabIdentifier, label: "Dictionary", view: buildDictionaryTab()))
+        tabView.selectTabViewItem(withIdentifier: Self.historyTabIdentifier)
 
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
@@ -280,10 +294,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         splitView.isVertical = true
         splitView.dividerStyle = .thin
         splitView.translatesAutoresizingMaskIntoConstraints = false
+        historySplitView = splitView
 
         configureHistoryTable()
         let tableScrollView = NSScrollView()
         tableScrollView.hasVerticalScroller = true
+        tableScrollView.hasHorizontalScroller = false
         tableScrollView.documentView = historyTableView
 
         historyDetailView.isEditable = false
@@ -360,6 +376,8 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         historyTableView.rowHeight = 32
         historyTableView.dataSource = self
         historyTableView.delegate = self
+        historyTableView.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
+        historyTableView.autoresizingMask = [.width]
 
         if historyTableView.tableColumns.isEmpty {
             let dateColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("date"))
@@ -526,12 +544,55 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         return PersonalDictionary(terms: terms, replacements: replacements)
     }
 
-    private func selectFirstHistoryRecord() {
-        if !historyRecords.isEmpty {
-            historyTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        } else {
+    private func refreshHistoryDisplay() {
+        historyCountLabel.stringValue = "\(historyRecords.count) records"
+        historyTableView.reloadData()
+
+        if historyRecords.isEmpty {
+            historyTableView.deselectAll(nil)
             historyDetailView.string = ""
+        } else {
+            let selectedRow = historyTableView.selectedRow
+            let rowToSelect = (0..<historyRecords.count).contains(selectedRow) ? selectedRow : 0
+            historyTableView.selectRowIndexes(IndexSet(integer: rowToSelect), byExtendingSelection: false)
+            updateHistoryDetail()
         }
+
+        refreshHistoryTableAfterLayout()
+    }
+
+    private func refreshHistoryTableAfterLayout() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+            self.restoreHistorySplitPositionIfNeeded()
+            self.historyTableView.noteNumberOfRowsChanged()
+            self.historyTableView.reloadData()
+            self.historyTableView.needsDisplay = true
+            self.historyTableView.enclosingScrollView?.contentView.needsDisplay = true
+        }
+    }
+
+    private func restoreHistorySplitPositionIfNeeded() {
+        guard let splitView = historySplitView, splitView.arrangedSubviews.count == 2 else {
+            return
+        }
+
+        let width = splitView.bounds.width
+        guard width > 700 else {
+            return
+        }
+
+        let currentTableWidth = splitView.arrangedSubviews[0].frame.width
+        guard currentTableWidth < 160 else {
+            return
+        }
+
+        let targetTableWidth = min(max(width * 0.48, 360), width - 300)
+        splitView.setPosition(targetTableWidth, ofDividerAt: 0)
     }
 
     private func updateHistoryDetail() {
@@ -661,6 +722,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         formatter.timeStyle = .short
         return formatter
     }()
+
+    private static let settingsTabIdentifier = "settings"
+    private static let historyTabIdentifier = "history"
+    private static let dictionaryTabIdentifier = "dictionary"
 
     private static let fullDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
