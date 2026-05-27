@@ -6,7 +6,8 @@
     "Deepgram",
     "Wispr Flow",
     "WhatsApp",
-    "Telegram"
+    "Telegram",
+    "Prepstr"
   ],
   "replacements": {
     "code ex": "Codex",
