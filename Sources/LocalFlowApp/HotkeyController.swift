@@ -72,6 +72,15 @@ struct HotkeySpec: Equatable {
         key == .fn && flags.contains(.maskSecondaryFn)
     }
 
+    func matchesFnKeyEvent(_ event: CGEvent) -> Bool {
+        guard key == .fn else {
+            return false
+        }
+
+        let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        return keyCode == 63 // kVK_Function
+    }
+
     private func normalizedModifiers(_ flags: CGEventFlags) -> CGEventFlags {
         flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn])
     }
@@ -91,6 +100,7 @@ final class HotkeyController {
     private var runLoopSource: CFRunLoopSource?
     private var fnIsDown = false
     private var holdFallbackIsDown = false
+    private(set) var isRunning = false
 
     init(holdHotkey: String, fallbackHoldHotkey: String, toggleHotkey: String) {
         self.holdSpec = HotkeySpec.parse(holdHotkey)
@@ -98,7 +108,10 @@ final class HotkeyController {
         self.toggleSpec = HotkeySpec.parse(toggleHotkey)
     }
 
-    func start() {
+    @discardableResult
+    func start() -> Bool {
+        stop()
+
         let eventMask =
             (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
@@ -126,7 +139,8 @@ final class HotkeyController {
         )
 
         guard let eventTap else {
-            return
+            isRunning = false
+            return false
         }
 
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
@@ -135,6 +149,8 @@ final class HotkeyController {
         }
 
         CGEvent.tapEnable(tap: eventTap, enable: true)
+        isRunning = true
+        return true
     }
 
     func stop() {
@@ -148,6 +164,9 @@ final class HotkeyController {
 
         eventTap = nil
         runLoopSource = nil
+        isRunning = false
+        fnIsDown = false
+        holdFallbackIsDown = false
     }
 
     private func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -190,6 +209,14 @@ final class HotkeyController {
     private func handleKeyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
 
+        if let holdSpec, holdSpec.matchesFnKeyEvent(event), !isRepeat {
+            if !fnIsDown {
+                fnIsDown = true
+                onHoldStart?()
+            }
+            return nil
+        }
+
         if let toggleSpec, toggleSpec.matchesKeyEvent(event), !isRepeat {
             onToggle?()
             return nil
@@ -207,6 +234,14 @@ final class HotkeyController {
     }
 
     private func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        if let holdSpec, holdSpec.matchesFnKeyEvent(event) {
+            if fnIsDown {
+                fnIsDown = false
+                onHoldEnd?()
+            }
+            return nil
+        }
+
         if let fallbackHoldSpec, fallbackHoldSpec.matchesKeyEvent(event) {
             if holdFallbackIsDown {
                 holdFallbackIsDown = false

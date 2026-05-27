@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyController: HotkeyController?
     private var floatingBarController: FloatingBarController?
     private var settingsWindowController: SettingsWindowController?
+    private var accessibilityRetryTimer: Timer?
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
@@ -24,9 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             try loadRuntimeConfiguration()
-            setupControllers()
             setupMenuBar()
-            requestAccessibilityPermissionIfNeeded()
+            setupControllers()
+            refreshAccessibilityMenuState()
         } catch {
             setupMenuBar()
             showFatalError(error)
@@ -34,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        accessibilityRetryTimer?.invalidate()
         hotkeyController?.stop()
     }
 
@@ -101,11 +103,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onToggle = { [weak self] in
             self?.dictationController?.toggleRecording()
         }
-        hotkeyController.start()
+        _ = hotkeyController.start()
 
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
         self.hotkeyController = hotkeyController
+        refreshAccessibilityMenuState()
     }
 
     private func setupMenuBar() {
@@ -164,8 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func requestAccessibilityPermissionIfNeeded() {
-        _ = PermissionManager.isAccessibilityTrusted(prompt: true)
+    private func refreshAccessibilityMenuState() {
+        let trusted = PermissionManager.isAccessibilityTrusted(prompt: false)
+        accessibilityMenuItem.title = trusted ? "Accessibility Permission Granted" : "Enable Accessibility Permission"
+        accessibilityMenuItem.isEnabled = !trusted
     }
 
     private func showFatalError(_ error: Error) {
@@ -228,7 +233,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func requestAccessibilityPermission() {
+        if PermissionManager.isAccessibilityTrusted(prompt: false) {
+            refreshAccessibilityMenuState()
+            if hotkeyController?.isRunning != true {
+                restartHotkeys()
+            }
+            return
+        }
+
         _ = PermissionManager.isAccessibilityTrusted(prompt: true)
+        scheduleHotkeyRetryAfterAccessibilityPrompt()
     }
 
     @objc private func quit() {
@@ -252,8 +266,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onToggle = { [weak dictationController] in
             dictationController?.toggleRecording()
         }
-        hotkeyController.start()
+        let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
+        refreshAccessibilityMenuState()
+
+        if !started, !PermissionManager.isAccessibilityTrusted(prompt: false) {
+            scheduleHotkeyRetryAfterAccessibilityPrompt()
+        }
+    }
+
+    private func scheduleHotkeyRetryAfterAccessibilityPrompt() {
+        accessibilityRetryTimer?.invalidate()
+        accessibilityRetryTimer = Timer.scheduledTimer(
+            timeInterval: 1.5,
+            target: self,
+            selector: #selector(accessibilityRetryTimerFired(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func accessibilityRetryTimerFired(_ timer: Timer) {
+        refreshAccessibilityMenuState()
+        guard PermissionManager.isAccessibilityTrusted(prompt: false) else {
+            return
+        }
+
+        timer.invalidate()
+        accessibilityRetryTimer = nil
+        restartHotkeys()
     }
 
     private func configureSettingsWindowCallbacks(_ controller: SettingsWindowController) {
