@@ -1,0 +1,17 @@
+{
+  "terms": [
+    "Codex",
+    "Cursor",
+    "OpenAI",
+    "Deepgram",
+    "Wispr Flow",
+    "WhatsApp",
+    "Telegram"
+  ],
+  "replacements": {
+    "code ex": "Codex",
+    "whisper flow": "Wispr Flow",
+    "open ai": "OpenAI",
+    "what's app": "WhatsApp"
+  }
+}
