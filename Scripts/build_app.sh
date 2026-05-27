@@ -53,6 +53,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>LocalFlow records your voice while you hold the dictation hotkey, then transcribes it.</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>LocalFlow listens for your configured global dictation hotkeys while it runs in the background.</string>
 </dict>
 </plist>
 PLIST

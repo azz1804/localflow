@@ -42,6 +42,14 @@ System Settings > Privacy & Security > Accessibility
 
 Then enable LocalFlow. If it appears twice after rebuilds, remove the old entry and add the latest app bundle again.
 
+On some macOS versions, global hotkeys also require:
+
+```text
+System Settings > Privacy & Security > Input Monitoring
+```
+
+Enable LocalFlow there too if `Fn` or `Option+Space` does nothing while the app is running.
+
 To install or update the app in `/Applications`, use the install script. It quits any running LocalFlow process before replacing the bundle:
 
 ```bash
@@ -150,4 +158,5 @@ Live transcription was not exercised here because no real `.env` with `OPENAI_AP
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
 - `Fn` does nothing: click `LF > Hotkeys: Inactive - Retry` if visible. If it stays inactive, remove LocalFlow from `System Settings > Privacy & Security > Accessibility`, run `./Scripts/install_app.sh`, then enable the new LocalFlow entry.
+- If the menu says `Hotkeys: Active` but keys still do nothing, also enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`.
 - Diagnostics are written to `~/Library/Application Support/LocalFlow/localflow.log`.
