@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.dictationController?.toggleRecording()
         }
         let started = hotkeyController.start()
-        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
+        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
 
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
@@ -189,7 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateHotkeyStatusMenu() {
         if hotkeyController?.isRunning == true {
-            hotkeyStatusMenuItem.title = "Hotkeys: Active"
+            let tap = hotkeyController?.activeTapDescription ?? "none"
+            let monitors = hotkeyController?.monitorsAreInstalled == true ? "+monitor" : ""
+            hotkeyStatusMenuItem.title = "Hotkeys: Active (\(tap)\(monitors))"
             hotkeyStatusMenuItem.isEnabled = false
         } else {
             hotkeyStatusMenuItem.title = "Hotkeys: Inactive - Retry"
@@ -299,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
-        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
+        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
         refreshAccessibilityMenuState()
 
         if !started {
