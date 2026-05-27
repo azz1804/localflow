@@ -213,6 +213,9 @@ final class HotkeyController {
     private var fnIsDown = false
     private var hidFnIsDown = false
     private var holdFallbackIsDown = false
+    private var activeHoldSource: String?
+    private var pendingHoldTask: Task<Void, Never>?
+    private var pendingHoldSource: String?
     private var lastToggleTime: CFTimeInterval = 0
     private(set) var isRunning = false
     private(set) var activeTapDescription = "none"
@@ -330,6 +333,8 @@ final class HotkeyController {
         fnIsDown = false
         hidFnIsDown = false
         holdFallbackIsDown = false
+        activeHoldSource = nil
+        cancelPendingHoldStart()
         lastToggleTime = 0
     }
 
@@ -503,7 +508,7 @@ final class HotkeyController {
 
         hidFnIsDown = isDown
         if isDown {
-            startHold(source: "fn-hid")
+            requestFnHoldStart(source: "fn-hid")
         } else {
             endHold(source: "fn-hid")
         }
@@ -547,7 +552,7 @@ final class HotkeyController {
             if isDown != fnIsDown {
                 fnIsDown = isDown
                 if isDown {
-                    startHold(source: "fn-cg-flags")
+                    requestFnHoldStart(source: "fn-cg-flags")
                 } else {
                     endHold(source: "fn-cg-flags")
                 }
@@ -564,12 +569,15 @@ final class HotkeyController {
         if let holdSpec, holdSpec.matchesFnKeyEvent(event), !isRepeat {
             if !fnIsDown {
                 fnIsDown = true
-                startHold(source: "fn-cg-key")
+                requestFnHoldStart(source: "fn-cg-key")
             }
             return nil
         }
 
         if let toggleSpec, toggleSpec.matchesKeyEvent(event), !isRepeat {
+            guard canTriggerToggleFromFnCombinationIfNeeded() else {
+                return Unmanaged.passUnretained(event)
+            }
             triggerToggleIfNeeded(source: "toggle-cg-key")
             return nil
         }
@@ -623,7 +631,7 @@ final class HotkeyController {
             if isDown != fnIsDown {
                 fnIsDown = isDown
                 if isDown {
-                    startHold(source: "fn-nsevent-flags")
+                    requestFnHoldStart(source: "fn-nsevent-flags")
                 } else {
                     endHold(source: "fn-nsevent-flags")
                 }
@@ -642,12 +650,15 @@ final class HotkeyController {
         if let holdSpec, holdSpec.matchesFnKeyEvent(snapshot) {
             if !fnIsDown {
                 fnIsDown = true
-                startHold(source: "fn-nsevent-key")
+                requestFnHoldStart(source: "fn-nsevent-key")
             }
             return true
         }
 
         if let toggleSpec, toggleSpec.matchesKeyEvent(snapshot) {
+            guard canTriggerToggleFromFnCombinationIfNeeded() else {
+                return false
+            }
             triggerToggleIfNeeded(source: "toggle-nsevent-key")
             return true
         }
@@ -664,15 +675,82 @@ final class HotkeyController {
     }
 
     private func startHold(source: String) {
+        guard activeHoldSource == nil else {
+            return
+        }
+
+        activeHoldSource = source
         LocalFlowLogger.log("Hotkey hold start source=\(source)")
         onDiagnosticEvent?("hold start: \(Self.displayName(for: source))")
         onHoldStart?()
     }
 
     private func endHold(source: String) {
+        if cancelPendingHoldStart() {
+            return
+        }
+
+        guard activeHoldSource != nil else {
+            return
+        }
+
+        activeHoldSource = nil
         LocalFlowLogger.log("Hotkey hold end source=\(source)")
         onDiagnosticEvent?("hold end: \(Self.displayName(for: source))")
         onHoldEnd?()
+    }
+
+    private func requestFnHoldStart(source: String) {
+        guard toggleUsesFnModifier else {
+            startHold(source: source)
+            return
+        }
+
+        guard activeHoldSource == nil else {
+            return
+        }
+
+        pendingHoldSource = source
+        pendingHoldTask?.cancel()
+        pendingHoldTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.fnCombinationDelayNanoseconds)
+            await MainActor.run {
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+
+                let source = self.pendingHoldSource ?? "fn"
+                self.pendingHoldTask = nil
+                self.pendingHoldSource = nil
+                self.startHold(source: source)
+            }
+        }
+    }
+
+    @discardableResult
+    private func cancelPendingHoldStart() -> Bool {
+        let hadPendingHold = pendingHoldTask != nil
+        pendingHoldTask?.cancel()
+        pendingHoldTask = nil
+        pendingHoldSource = nil
+        return hadPendingHold
+    }
+
+    private var toggleUsesFnModifier: Bool {
+        toggleSpec?.modifiers.contains(.maskSecondaryFn) == true
+    }
+
+    private func canTriggerToggleFromFnCombinationIfNeeded() -> Bool {
+        guard toggleUsesFnModifier else {
+            return true
+        }
+
+        guard activeHoldSource == nil else {
+            return false
+        }
+
+        cancelPendingHoldStart()
+        return true
     }
 
     private func triggerToggleIfNeeded(source: String) {
@@ -785,4 +863,5 @@ final class HotkeyController {
     private static let keyboardFnUsage = 0xE8
     private static let appleVendorUsagePage = 0xFF00
     private static let appleVendorFnUsages: Set<Int> = [3, 11, 13, 95]
+    private static let fnCombinationDelayNanoseconds: UInt64 = 180_000_000
 }

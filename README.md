@@ -8,7 +8,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - Floating recording/processing bar.
 - LocalFlow interface with settings, history and dictionary tabs.
 - Hold-to-talk hotkey: `Fn` first, with `Option+Space` fallback.
-- Toggle hotkey: `Control+Option+Space`.
+- Toggle hotkey: `Fn+Space`.
 - Local temporary audio recording, deleted after transcription.
 - OpenAI transcription with French defaults and mixed English vocabulary support.
 - Optional OpenAI polish pass, disabled by default.
@@ -103,7 +103,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
-- Press `Control+Option+Space` to start/stop toggle recording.
+- Press `Fn+Space` to start/stop toggle recording.
 - Use the menu bar icon for manual start/stop, settings, local data folder and quit.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Reload .env and Dictionary` from the menu bar or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Reload .env and Dictionary`.

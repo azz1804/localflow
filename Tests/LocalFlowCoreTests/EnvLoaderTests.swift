@@ -46,7 +46,7 @@ final class EnvLoaderTests: XCTestCase {
             polishModel: "gpt-4o-mini",
             holdHotkey: "fn",
             fallbackHoldHotkey: "option+space",
-            toggleHotkey: "control+option+space",
+            toggleHotkey: "fn+space",
             historyRetentionDays: 45,
             restoreClipboardAfterPaste: false,
             pasteRestoreDelayMilliseconds: 500

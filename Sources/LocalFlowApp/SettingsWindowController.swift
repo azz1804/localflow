@@ -417,7 +417,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             polishModel: polishModelField.stringValue.nonEmptyOr("gpt-4o-mini"),
             holdHotkey: holdHotkeyField.stringValue.nonEmptyOr("fn"),
             fallbackHoldHotkey: fallbackHoldHotkeyField.stringValue.nonEmptyOr("option+space"),
-            toggleHotkey: toggleHotkeyField.stringValue.nonEmptyOr("control+option+space"),
+            toggleHotkey: toggleHotkeyField.stringValue.nonEmptyOr("fn+space"),
             historyRetentionDays: max(1, retentionDays),
             restoreClipboardAfterPaste: restoreClipboardCheckbox.state == .on,
             pasteRestoreDelayMilliseconds: max(0, pasteDelay)
