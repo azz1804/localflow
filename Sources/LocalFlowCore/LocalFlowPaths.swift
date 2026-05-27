@@ -23,8 +23,8 @@ public enum LocalFlowPaths {
             candidates.append(URL(fileURLWithPath: explicitPath).standardizedFileURL)
         }
 
-        candidates.append(currentDirectory.appendingPathComponent(".env"))
         candidates.append(appSupportDirectory.appendingPathComponent(".env"))
+        candidates.append(currentDirectory.appendingPathComponent(".env"))
 
         if let bundleResourceURL {
             candidates.append(bundleResourceURL.appendingPathComponent(".env"))
@@ -40,8 +40,8 @@ public enum LocalFlowPaths {
             candidates.append(URL(fileURLWithPath: explicitPath).standardizedFileURL)
         }
 
-        candidates.append(currentDirectory.appendingPathComponent("Config/dictionary.json"))
         candidates.append(appSupportDirectory.appendingPathComponent("dictionary.json"))
+        candidates.append(currentDirectory.appendingPathComponent("Config/dictionary.json"))
 
         if let bundleResourceURL {
             candidates.append(bundleResourceURL.appendingPathComponent("dictionary.json"))

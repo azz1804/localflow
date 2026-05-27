@@ -34,6 +34,9 @@ final class HistoryStoreTests: XCTestCase {
         try store.prune(retentionDays: 1, now: Date(timeIntervalSince1970: 200_000))
         XCTAssertEqual(try store.load().map(\.finalText), ["récent"])
 
+        try store.clear()
+        XCTAssertEqual(try store.load(), [])
+
         try? FileManager.default.removeItem(at: directory)
     }
 }

@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fallback: dictionary
         )
 
-        if dictionarySourceURL == nil {
+        if dictionarySourceURL == nil || dictionarySourceURL?.standardizedFileURL != editableDictionaryURL.standardizedFileURL {
             dictionarySourceURL = editableDictionaryURL
         }
 
@@ -110,7 +110,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenuBar() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "LF"
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            icon.size = NSSize(width: 18, height: 18)
+            icon.isTemplate = false
+            statusItem.button?.image = icon
+        } else {
+            statusItem.button?.title = "LF"
+        }
         statusItem.button?.toolTip = "LocalFlow"
 
         let menu = NSMenu()
@@ -123,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings", action: #selector(showSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "Open LocalFlow", action: #selector(showSettings), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
@@ -189,8 +196,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showSettings() {
         let settingsWindowController = self.settingsWindowController ?? SettingsWindowController()
+        configureSettingsWindowCallbacks(settingsWindowController)
         settingsWindowController.update(
             configuration: configuration,
+            dictionary: dictionary,
+            historyRecords: loadHistoryRecords(),
             envSource: envSourceURL,
             dictionarySource: dictionarySourceURL,
             historyURL: historyURL,
@@ -244,5 +254,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyController.start()
         self.hotkeyController = hotkeyController
+    }
+
+    private func configureSettingsWindowCallbacks(_ controller: SettingsWindowController) {
+        controller.onSaveSettings = { [weak self] updatedConfiguration in
+            guard let self else {
+                return .success(())
+            }
+
+            do {
+                let url = self.appSupportURL.appendingPathComponent(".env")
+                try ConfigurationStore.save(updatedConfiguration, to: url)
+                self.envSourceURL = url
+                self.configuration = updatedConfiguration
+                try HistoryStore(url: self.historyURL).prune(retentionDays: updatedConfiguration.historyRetentionDays)
+                self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
+                self.restartHotkeys()
+                self.polishMenuItem.state = updatedConfiguration.enablePolish ? .on : .off
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }
+
+        controller.onSaveDictionary = { [weak self] updatedDictionary in
+            guard let self else {
+                return .success(())
+            }
+
+            do {
+                let url = self.appSupportURL.appendingPathComponent("dictionary.json")
+                try DictionaryStore.save(updatedDictionary, to: url)
+                self.dictionary = updatedDictionary
+                self.dictionarySourceURL = url
+                self.dictationController?.updateConfiguration(self.configuration, dictionary: updatedDictionary)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }
+
+        controller.onClearHistory = { [weak self] in
+            guard let self else {
+                return .success(())
+            }
+
+            do {
+                try HistoryStore(url: self.historyURL).clear()
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }
+
+        controller.onRefresh = { [weak self] in
+            self?.reloadConfiguration()
+        }
+
+        controller.onRequestAccessibility = { [weak self] in
+            self?.requestAccessibilityPermission()
+        }
+
+        controller.onOpenSupportFolder = { [weak self] in
+            self?.openSupportFolder()
+        }
+    }
+
+    private func loadHistoryRecords() -> [DictationRecord] {
+        (try? HistoryStore(url: historyURL).load(limit: 500)) ?? []
     }
 }

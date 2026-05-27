@@ -69,4 +69,12 @@ public enum DictionaryStore {
         try data.write(to: url, options: .atomic)
         return url
     }
+
+    public static func save(_ dictionary: PersonalDictionary, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(dictionary)
+        try data.write(to: url, options: .atomic)
+    }
 }

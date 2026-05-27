@@ -6,6 +6,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 
 - Native macOS menu bar app.
 - Floating recording/processing bar.
+- LocalFlow interface with settings, history and dictionary tabs.
 - Hold-to-talk hotkey: `Fn` first, with `Option+Space` fallback.
 - Toggle hotkey: `Control+Option+Space`.
 - Local temporary audio recording, deleted after transcription.
@@ -57,10 +58,30 @@ Menu bar items:
 
 - `Start Recording` / `Stop Recording`: manual recording control.
 - `Polish Dictation`: toggles the optional post-processing pass for the current session.
-- `Settings`: shows current config, hotkeys, file paths and permission status.
+- `Open LocalFlow`: opens the graphical interface.
 - `Reload .env and Dictionary`: reloads config, dictionary and hotkeys without rebuilding.
 - `Open Support Folder`: opens the runtime folder that contains `dictionary.json` and `history.jsonl`.
 - `Request Accessibility Permission`: triggers the macOS permission prompt again.
+
+## Graphical interface
+
+Open it from `LF > Open LocalFlow`.
+
+- `Settings`: edit the OpenAI key, models, language, hotkeys, polish, clipboard restore and history retention.
+- `History`: browse recent dictated messages, inspect raw/final text, copy any item with its row-level `Copy` button, or clear local history.
+- `Dictionary`: edit vocabulary terms and replacement rules. Terms are one per line. Replacements use `spoken phrase = final text`.
+
+Settings are saved to:
+
+```text
+~/Library/Application Support/LocalFlow/.env
+```
+
+Dictionary edits are saved to:
+
+```text
+~/Library/Application Support/LocalFlow/dictionary.json
+```
 
 ## Local data
 
@@ -94,8 +115,9 @@ Manual smoke test:
 4. Confirm the floating bar shows `Recording`, then `Processing`, then `Pasted`.
 5. Confirm the text appears at the cursor.
 6. Open Terminal or Cursor and repeat with a technical prompt.
-7. Open `~/Library/Application Support/LocalFlow/history.jsonl` and confirm the text-only record was appended.
-8. Add `"code ex": "Codex"` to the dictionary replacements, reload from the menu, dictate `code ex`, and confirm the pasted output uses `Codex`.
+7. Open `LF > Open LocalFlow > History` and confirm the text-only record appears.
+8. Click the row-level `Copy` button and confirm the full generated text is copied.
+9. Open `Dictionary`, add `code ex = Codex` to replacements, save, dictate `code ex`, and confirm the pasted output uses `Codex`.
 
 ## Verification performed during development
 

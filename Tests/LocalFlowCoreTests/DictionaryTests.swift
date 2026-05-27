@@ -22,4 +22,21 @@ final class DictionaryTests: XCTestCase {
 
         XCTAssertEqual(result, "Je parle à Codex et OpenAI, mais pas à mycode example.")
     }
+
+    func testDictionaryStoreSavesEditableJSON() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlowDictionary-\(UUID().uuidString)", isDirectory: true)
+        let url = directory.appendingPathComponent("dictionary.json")
+        let dictionary = PersonalDictionary(
+            terms: ["Codex", "Prepstr"],
+            replacements: ["code ex": "Codex"]
+        )
+
+        try DictionaryStore.save(dictionary, to: url)
+        let loaded = try DictionaryStore.load(candidates: [url])
+
+        XCTAssertEqual(loaded.dictionary, dictionary)
+
+        try? FileManager.default.removeItem(at: directory)
+    }
 }

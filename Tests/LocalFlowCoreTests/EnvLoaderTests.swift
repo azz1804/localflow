@@ -36,4 +36,25 @@ final class EnvLoaderTests: XCTestCase {
         XCTAssertEqual(configuration.historyRetentionDays, 14)
         XCTAssertEqual(configuration.pasteRestoreDelayMilliseconds, 1200)
     }
+
+    func testConfigurationCanRoundTripThroughEnvFile() {
+        let configuration = AppConfiguration(
+            openAIAPIKey: "sk-test",
+            transcriptionModel: "gpt-4o-transcribe",
+            transcriptionLanguage: "fr",
+            enablePolish: true,
+            polishModel: "gpt-4o-mini",
+            holdHotkey: "fn",
+            fallbackHoldHotkey: "option+space",
+            toggleHotkey: "control+option+space",
+            historyRetentionDays: 45,
+            restoreClipboardAfterPaste: false,
+            pasteRestoreDelayMilliseconds: 500
+        )
+
+        let parsed = EnvLoader.parse(configuration.envFileContents())
+        let roundTripped = AppConfiguration(env: parsed)
+
+        XCTAssertEqual(roundTripped, configuration)
+    }
 }

@@ -64,6 +64,38 @@ public struct AppConfiguration: Equatable, Sendable {
         )
     }
 
+    public func envFileContents() -> String {
+        let values: [(String, String)] = [
+            ("OPENAI_API_KEY", openAIAPIKey ?? ""),
+            ("TRANSCRIPTION_MODEL", transcriptionModel),
+            ("TRANSCRIPTION_LANGUAGE", transcriptionLanguage),
+            ("ENABLE_POLISH", enablePolish ? "true" : "false"),
+            ("POLISH_MODEL", polishModel),
+            ("HOLD_HOTKEY", holdHotkey),
+            ("FALLBACK_HOLD_HOTKEY", fallbackHoldHotkey),
+            ("TOGGLE_HOTKEY", toggleHotkey),
+            ("HISTORY_RETENTION_DAYS", String(historyRetentionDays)),
+            ("RESTORE_CLIPBOARD_AFTER_PASTE", restoreClipboardAfterPaste ? "true" : "false"),
+            ("PASTE_RESTORE_DELAY_MS", String(pasteRestoreDelayMilliseconds))
+        ]
+
+        return values
+            .map { "\($0)=\(Self.escapedEnvValue($1))" }
+            .joined(separator: "\n") + "\n"
+    }
+
+    private static func escapedEnvValue(_ value: String) -> String {
+        let needsQuoting = value.contains { character in
+            character.isWhitespace || character == "#" || character == "\"" || character == "'"
+        }
+
+        guard needsQuoting else {
+            return value
+        }
+
+        return "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
     private static func boolValue(_ value: String?, default defaultValue: Bool) -> Bool {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !value.isEmpty else {
             return defaultValue
@@ -85,6 +117,13 @@ public struct AppConfiguration: Equatable, Sendable {
         }
 
         return intValue
+    }
+}
+
+public enum ConfigurationStore {
+    public static func save(_ configuration: AppConfiguration, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try configuration.envFileContents().write(to: url, atomically: true, encoding: .utf8)
     }
 }
 
