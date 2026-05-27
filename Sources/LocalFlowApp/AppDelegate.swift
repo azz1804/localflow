@@ -165,7 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reloadItem.target = self
         menu.addItem(reloadItem)
 
-        let openSupportItem = NSMenuItem(title: "Open Support Folder", action: #selector(openSupportFolder), keyEquivalent: "")
+        let openSupportItem = NSMenuItem(title: "Open Local Data Folder", action: #selector(openSupportFolder), keyEquivalent: "")
         openSupportItem.target = self
         menu.addItem(openSupportItem)
 

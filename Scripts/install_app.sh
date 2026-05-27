@@ -17,6 +17,13 @@ if pgrep -x LocalFlow >/dev/null 2>&1; then
 fi
 
 APP_PATH="$("$ROOT_DIR/Scripts/build_app.sh")"
+SUPPORT_DIR="$HOME/Library/Application Support/LocalFlow"
+SUPPORT_ENV="$SUPPORT_DIR/.env"
+
+if [[ -f "$ROOT_DIR/.env" && ! -f "$SUPPORT_ENV" ]]; then
+  mkdir -p "$SUPPORT_DIR"
+  cp "$ROOT_DIR/.env" "$SUPPORT_ENV"
+fi
 
 if [[ "$DEST_DIR" == "/Applications" ]]; then
   if [[ -w "$DEST_DIR" ]]; then

@@ -67,7 +67,7 @@ For a user-local install:
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Control+Option+Space` to start/stop toggle recording.
-- Use the menu bar icon for manual start/stop, settings, support folder and quit.
+- Use the menu bar icon for manual start/stop, settings, local data folder and quit.
 - Edit `.env`, then use `Reload .env and Dictionary` from the menu bar or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Reload .env and Dictionary`.
 - `Config/dictionary.json` is the project-side fallback copied into the app bundle during build.
@@ -80,7 +80,7 @@ Menu bar items:
 - `Polish Dictation`: toggles the optional post-processing pass for the current session.
 - `Open LocalFlow`: opens the graphical interface.
 - `Reload .env and Dictionary`: reloads config, dictionary and hotkeys without rebuilding.
-- `Open Support Folder`: opens the runtime folder that contains `dictionary.json` and `history.jsonl`.
+- `Open Local Data Folder`: opens the runtime folder that contains `.env`, `dictionary.json`, `history.jsonl` and `localflow.log`.
 - `Hotkeys: Active`: confirms the global keyboard hooks are running. `+hid` means the low-level Fn/Globe listener is active.
 - `Last hotkey`: shows the latest real hotkey event LocalFlow received, including whether it came from `Fn` or `Option+Space`.
 - `Fn blocked - Enable Input Monitoring`: LocalFlow can run, but macOS is blocking the `Fn` listener.

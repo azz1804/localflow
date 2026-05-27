@@ -59,10 +59,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-if [[ -f "$ROOT_DIR/.env" ]]; then
-  cp "$ROOT_DIR/.env" "$RESOURCES_DIR/.env"
-fi
-
 if [[ -f "$ROOT_DIR/Config/dictionary.json" ]]; then
   cp "$ROOT_DIR/Config/dictionary.json" "$RESOURCES_DIR/dictionary.json"
 else

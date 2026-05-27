@@ -247,7 +247,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         buttons.addArrangedSubview(button("Save Settings", action: #selector(saveSettings)))
         buttons.addArrangedSubview(button("Request Accessibility", action: #selector(requestAccessibility)))
         buttons.addArrangedSubview(button("Request Input Monitoring", action: #selector(requestInputMonitoring)))
-        buttons.addArrangedSubview(button("Open Support Folder", action: #selector(openSupportFolder)))
+        buttons.addArrangedSubview(button("Open Local Data Folder", action: #selector(openSupportFolder)))
         buttons.addArrangedSubview(NSView())
         stack.addArrangedSubview(buttons)
 
