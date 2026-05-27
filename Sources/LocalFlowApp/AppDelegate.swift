@@ -22,8 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
     private let hotkeyStatusMenuItem = NSMenuItem(title: "Hotkeys: Starting", action: #selector(retryHotkeys), keyEquivalent: "")
+    private let lastHotkeyMenuItem = NSMenuItem(title: "Last hotkey: none", action: nil, keyEquivalent: "")
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
     private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
+    private let diagnosticLogMenuItem = NSMenuItem(title: "Open Diagnostic Log", action: #selector(openDiagnosticLog), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -107,6 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onToggle = { [weak self] in
             self?.dictationController?.toggleRecording()
         }
+        hotkeyController.onDiagnosticEvent = { [weak self] event in
+            self?.updateLastHotkey(event)
+        }
         let started = hotkeyController.start()
         LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
 
@@ -165,11 +170,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyStatusMenuItem.target = self
         menu.addItem(hotkeyStatusMenuItem)
 
+        lastHotkeyMenuItem.isEnabled = false
+        menu.addItem(lastHotkeyMenuItem)
+
         accessibilityMenuItem.target = self
         menu.addItem(accessibilityMenuItem)
 
         inputMonitoringMenuItem.target = self
         menu.addItem(inputMonitoringMenuItem)
+
+        diagnosticLogMenuItem.target = self
+        menu.addItem(diagnosticLogMenuItem)
 
         menu.addItem(.separator())
 
@@ -231,6 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             && !PermissionManager.isInputMonitoringTrusted()
     }
 
+    private func updateLastHotkey(_ event: String) {
+        let time = Self.timeFormatter.string(from: Date())
+        lastHotkeyMenuItem.title = "Last hotkey: \(event) @ \(time)"
+    }
+
     private func showFatalError(_ error: Error) {
         floatingBarController?.update(status: .error(error.localizedDescription), level: 0)
     }
@@ -290,6 +306,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(appSupportURL)
     }
 
+    @objc private func openDiagnosticLog() {
+        let logURL = appSupportURL.appendingPathComponent("localflow.log")
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            NSWorkspace.shared.open(logURL)
+        } else {
+            NSWorkspace.shared.open(appSupportURL)
+        }
+    }
+
     @objc private func requestAccessibilityPermission() {
         if PermissionManager.isAccessibilityTrusted(prompt: false) {
             refreshPermissionMenuState()
@@ -341,6 +366,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyController.onToggle = { [weak dictationController] in
             dictationController?.toggleRecording()
+        }
+        hotkeyController.onDiagnosticEvent = { [weak self] event in
+            self?.updateLastHotkey(event)
         }
         let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
@@ -453,4 +481,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadHistoryRecords() -> [DictationRecord] {
         (try? HistoryStore(url: historyURL).load(limit: 500)) ?? []
     }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 }

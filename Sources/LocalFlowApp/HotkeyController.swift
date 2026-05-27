@@ -196,6 +196,7 @@ final class HotkeyController {
     var onHoldStart: (() -> Void)?
     var onHoldEnd: (() -> Void)?
     var onToggle: (() -> Void)?
+    var onDiagnosticEvent: ((String) -> Void)?
 
     private let holdSpec: HotkeySpec?
     private let fallbackHoldSpec: HotkeySpec?
@@ -566,11 +567,13 @@ final class HotkeyController {
 
     private func startHold(source: String) {
         LocalFlowLogger.log("Hotkey hold start source=\(source)")
+        onDiagnosticEvent?("hold start: \(Self.displayName(for: source))")
         onHoldStart?()
     }
 
     private func endHold(source: String) {
         LocalFlowLogger.log("Hotkey hold end source=\(source)")
+        onDiagnosticEvent?("hold end: \(Self.displayName(for: source))")
         onHoldEnd?()
     }
 
@@ -582,6 +585,7 @@ final class HotkeyController {
 
         lastToggleTime = now
         LocalFlowLogger.log("Hotkey toggle source=\(source)")
+        onDiagnosticEvent?("toggle: \(Self.displayName(for: source))")
         onToggle?()
     }
 
@@ -645,6 +649,33 @@ final class HotkeyController {
             return "listen"
         @unknown default:
             return "unknown"
+        }
+    }
+
+    private static func displayName(for source: String) -> String {
+        switch source {
+        case "fn-cg-flags":
+            return "Fn via CG flags"
+        case "fn-cg-key":
+            return "Fn via CG key"
+        case "fn-nsevent-flags":
+            return "Fn via NSEvent flags"
+        case "fn-nsevent-key":
+            return "Fn via NSEvent key"
+        case "fallback-carbon":
+            return "Option+Space via Carbon"
+        case "fallback-cg-key":
+            return "Option+Space via CG key"
+        case "fallback-nsevent-key":
+            return "Option+Space via NSEvent"
+        case "toggle-carbon":
+            return "toggle via Carbon"
+        case "toggle-cg-key":
+            return "toggle via CG key"
+        case "toggle-nsevent-key":
+            return "toggle via NSEvent"
+        default:
+            return source
         }
     }
 
