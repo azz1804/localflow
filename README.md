@@ -87,6 +87,8 @@ Menu bar items:
 - `Hotkeys: Inactive - Retry`: retries installing the global keyboard hook.
 - `Request Accessibility Permission`: triggers the macOS permission prompt again.
 - `Request Input Monitoring Permission`: triggers the macOS keyboard-listener permission prompt.
+- `Fn/Globe macOS action`: shows whether macOS is already using the Fn/Globe key for another action.
+- `Set Fn/Globe to Do Nothing`: writes `AppleFnUsageType=0`; restart your Mac for the system setting to fully apply.
 - `Open Diagnostic Log`: opens the runtime log used to debug hotkey, recording, transcription and paste events.
 
 ## Graphical interface
@@ -159,6 +161,7 @@ Live transcription was not exercised here because no real `.env` with `OPENAI_AP
 - No text is pasted after transcription: check Accessibility permission.
 - Recording fails immediately: check Microphone permission.
 - `Fn` does nothing: enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`, then click `LF > Hotkeys: Inactive - Retry` or restart LocalFlow.
+- If `Fn/Globe macOS action` is not `Do Nothing`, use `Set Fn/Globe to Do Nothing`, restart the Mac, then test `Fn` again.
 - After pressing `Fn`, open the menu and check `Last hotkey`. `Fn via HID` means LocalFlow caught it through the low-level listener; if it still says `none`, macOS did not deliver the key event to LocalFlow.
 - `Option+Space` does nothing: open `LF > Hotkeys...` and check `~/Library/Application Support/LocalFlow/localflow.log`.
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.

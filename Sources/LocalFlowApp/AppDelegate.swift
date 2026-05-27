@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
     private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
     private let diagnosticLogMenuItem = NSMenuItem(title: "Open Diagnostic Log", action: #selector(openDiagnosticLog), keyEquivalent: "")
+    private let fnSystemActionMenuItem = NSMenuItem(title: "Fn/Globe macOS action: Unknown", action: nil, keyEquivalent: "")
+    private let disableFnSystemActionMenuItem = NSMenuItem(title: "Set Fn/Globe to Do Nothing", action: #selector(setFnGlobeToDoNothing), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -179,6 +181,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         inputMonitoringMenuItem.target = self
         menu.addItem(inputMonitoringMenuItem)
 
+        fnSystemActionMenuItem.isEnabled = false
+        menu.addItem(fnSystemActionMenuItem)
+
+        disableFnSystemActionMenuItem.target = self
+        menu.addItem(disableFnSystemActionMenuItem)
+
         diagnosticLogMenuItem.target = self
         menu.addItem(diagnosticLogMenuItem)
 
@@ -210,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         inputMonitoringMenuItem.title = inputMonitoringTrusted ? "Input Monitoring Permission Granted" : "Enable Input Monitoring Permission"
         inputMonitoringMenuItem.isEnabled = !inputMonitoringTrusted
 
+        refreshFnSystemActionMenuState()
         updateHotkeyStatusMenu()
     }
 
@@ -246,6 +255,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateLastHotkey(_ event: String) {
         let time = Self.timeFormatter.string(from: Date())
         lastHotkeyMenuItem.title = "Last hotkey: \(event) @ \(time)"
+    }
+
+    private func refreshFnSystemActionMenuState() {
+        let usage = Self.fnUsageType
+        fnSystemActionMenuItem.title = "Fn/Globe macOS action: \(Self.description(forFnUsageType: usage))"
+        disableFnSystemActionMenuItem.isEnabled = usage != 0
     }
 
     private func showFatalError(_ error: Error) {
@@ -314,6 +329,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             NSWorkspace.shared.open(appSupportURL)
         }
+    }
+
+    @objc private func setFnGlobeToDoNothing() {
+        guard let defaults = UserDefaults(suiteName: "com.apple.HIToolbox") else {
+            return
+        }
+
+        defaults.set(0, forKey: "AppleFnUsageType")
+        defaults.synchronize()
+        LocalFlowLogger.log("Set AppleFnUsageType=0")
+        refreshFnSystemActionMenuState()
+
+        let alert = NSAlert()
+        alert.messageText = "Fn/Globe set to Do Nothing"
+        alert.informativeText = "Restart your Mac for this macOS keyboard setting to fully apply. LocalFlow can still use Option+Space meanwhile."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func requestAccessibilityPermission() {
@@ -488,4 +520,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()
+
+    private static var fnUsageType: Int? {
+        UserDefaults(suiteName: "com.apple.HIToolbox")?.object(forKey: "AppleFnUsageType") as? Int
+    }
+
+    private static func description(forFnUsageType usage: Int?) -> String {
+        switch usage {
+        case 0:
+            return "Do Nothing"
+        case 1:
+            return "Change Input Source"
+        case 2:
+            return "Show Emoji & Symbols"
+        case 3:
+            return "Start Dictation"
+        case let .some(value):
+            return "Unknown (\(value))"
+        case .none:
+            return "Default"
+        }
+    }
 }
