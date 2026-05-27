@@ -19,8 +19,13 @@ fi
 APP_PATH="$("$ROOT_DIR/Scripts/build_app.sh")"
 
 if [[ "$DEST_DIR" == "/Applications" ]]; then
-  sudo rm -rf "$DEST_APP"
-  sudo ditto "$APP_PATH" "$DEST_APP"
+  if [[ -w "$DEST_DIR" ]]; then
+    rm -rf "$DEST_APP"
+    ditto "$APP_PATH" "$DEST_APP"
+  else
+    sudo rm -rf "$DEST_APP"
+    sudo ditto "$APP_PATH" "$DEST_APP"
+  fi
   rm -rf "$HOME/Applications/$APP_NAME"
 else
   mkdir -p "$DEST_DIR"

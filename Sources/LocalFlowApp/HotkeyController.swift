@@ -101,6 +101,34 @@ struct HotkeySpec: Equatable {
         key == .fn && snapshot.keyCode == 63
     }
 
+    var carbonKeyCode: UInt32? {
+        switch key {
+        case .fn:
+            return nil
+        case .space:
+            return UInt32(kVK_Space)
+        }
+    }
+
+    var carbonModifiers: UInt32 {
+        var result: UInt32 = 0
+
+        if modifiers.contains(.maskCommand) {
+            result |= UInt32(cmdKey)
+        }
+        if modifiers.contains(.maskAlternate) {
+            result |= UInt32(optionKey)
+        }
+        if modifiers.contains(.maskControl) {
+            result |= UInt32(controlKey)
+        }
+        if modifiers.contains(.maskShift) {
+            result |= UInt32(shiftKey)
+        }
+
+        return result
+    }
+
     private func normalizedModifiers(_ flags: CGEventFlags) -> CGEventFlags {
         flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn])
     }
@@ -177,12 +205,15 @@ final class HotkeyController {
     private var runLoopSource: CFRunLoopSource?
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var carbonEventHandler: EventHandlerRef?
+    private var carbonHotkeys: [UInt32: EventHotKeyRef] = [:]
     private var fnIsDown = false
     private var holdFallbackIsDown = false
     private var lastToggleTime: CFTimeInterval = 0
     private(set) var isRunning = false
     private(set) var activeTapDescription = "none"
     private(set) var monitorsAreInstalled = false
+    private(set) var carbonHotkeysAreRegistered = false
 
     init(holdHotkey: String, fallbackHoldHotkey: String, toggleHotkey: String) {
         self.holdSpec = HotkeySpec.parse(holdHotkey)
@@ -194,6 +225,7 @@ final class HotkeyController {
     func start() -> Bool {
         stop()
 
+        installCarbonHotkeys()
         installNSEventMonitors()
 
         let eventMask =
@@ -230,7 +262,7 @@ final class HotkeyController {
         }
 
         guard let eventTap else {
-            isRunning = monitorsAreInstalled
+            isRunning = monitorsAreInstalled || carbonHotkeysAreRegistered
             activeTapDescription = "none"
             return isRunning
         }
@@ -252,6 +284,12 @@ final class HotkeyController {
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
         }
+        for hotkeyRef in carbonHotkeys.values {
+            UnregisterEventHotKey(hotkeyRef)
+        }
+        if let carbonEventHandler {
+            RemoveEventHandler(carbonEventHandler)
+        }
 
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
@@ -265,8 +303,11 @@ final class HotkeyController {
         runLoopSource = nil
         globalMonitor = nil
         localMonitor = nil
+        carbonEventHandler = nil
+        carbonHotkeys = [:]
         isRunning = false
         monitorsAreInstalled = false
+        carbonHotkeysAreRegistered = false
         activeTapDescription = "none"
         fnIsDown = false
         holdFallbackIsDown = false
@@ -299,6 +340,80 @@ final class HotkeyController {
         }
 
         monitorsAreInstalled = globalMonitor != nil || localMonitor != nil
+    }
+
+    private func installCarbonHotkeys() {
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
+        ]
+
+        let callback: EventHandlerUPP = { _, event, userData in
+            guard let event, let userData else {
+                return noErr
+            }
+
+            var hotkeyID = EventHotKeyID()
+            let status = GetEventParameter(
+                event,
+                EventParamName(kEventParamDirectObject),
+                EventParamType(typeEventHotKeyID),
+                nil,
+                MemoryLayout<EventHotKeyID>.size,
+                nil,
+                &hotkeyID
+            )
+            guard status == noErr else {
+                return status
+            }
+
+            let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
+            let eventKind = GetEventKind(event)
+            Task { @MainActor in
+                controller.handleCarbonHotkey(id: hotkeyID.id, eventKind: eventKind)
+            }
+            return noErr
+        }
+
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        let installStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            callback,
+            eventTypes.count,
+            &eventTypes,
+            refcon,
+            &carbonEventHandler
+        )
+        guard installStatus == noErr else {
+            carbonEventHandler = nil
+            carbonHotkeysAreRegistered = false
+            return
+        }
+
+        registerCarbonHotkey(spec: fallbackHoldSpec, id: Self.carbonFallbackHoldID)
+        registerCarbonHotkey(spec: toggleSpec, id: Self.carbonToggleID)
+        carbonHotkeysAreRegistered = !carbonHotkeys.isEmpty
+    }
+
+    private func registerCarbonHotkey(spec: HotkeySpec?, id: UInt32) {
+        guard let spec, let keyCode = spec.carbonKeyCode else {
+            return
+        }
+
+        var hotkeyRef: EventHotKeyRef?
+        let hotkeyID = EventHotKeyID(signature: Self.carbonSignature, id: id)
+        let status = RegisterEventHotKey(
+            keyCode,
+            spec.carbonModifiers,
+            hotkeyID,
+            GetApplicationEventTarget(),
+            OptionBits(0),
+            &hotkeyRef
+        )
+
+        if status == noErr, let hotkeyRef {
+            carbonHotkeys[id] = hotkeyRef
+        }
     }
 
     private func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -453,6 +568,25 @@ final class HotkeyController {
         onToggle?()
     }
 
+    private func handleCarbonHotkey(id: UInt32, eventKind: UInt32) {
+        switch (id, eventKind) {
+        case (Self.carbonFallbackHoldID, UInt32(kEventHotKeyPressed)):
+            if !holdFallbackIsDown {
+                holdFallbackIsDown = true
+                onHoldStart?()
+            }
+        case (Self.carbonFallbackHoldID, UInt32(kEventHotKeyReleased)):
+            if holdFallbackIsDown {
+                holdFallbackIsDown = false
+                onHoldEnd?()
+            }
+        case (Self.carbonToggleID, UInt32(kEventHotKeyPressed)):
+            triggerToggleIfNeeded()
+        default:
+            break
+        }
+    }
+
     private func handleNSEventKeyUp(_ snapshot: HotkeyEventSnapshot) -> Bool {
         if let holdSpec, holdSpec.matchesFnKeyEvent(snapshot) {
             if fnIsDown {
@@ -485,4 +619,8 @@ final class HotkeyController {
             return "unknown"
         }
     }
+
+    private static let carbonSignature: OSType = 0x4C464C57 // LFLW
+    private static let carbonFallbackHoldID: UInt32 = 1
+    private static let carbonToggleID: UInt32 = 2
 }

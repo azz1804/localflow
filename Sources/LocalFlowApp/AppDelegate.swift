@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.dictationController?.toggleRecording()
         }
         let started = hotkeyController.start()
-        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
+        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
 
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
@@ -191,7 +191,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotkeyController?.isRunning == true {
             let tap = hotkeyController?.activeTapDescription ?? "none"
             let monitors = hotkeyController?.monitorsAreInstalled == true ? "+monitor" : ""
-            hotkeyStatusMenuItem.title = "Hotkeys: Active (\(tap)\(monitors))"
+            let carbon = hotkeyController?.carbonHotkeysAreRegistered == true ? "+carbon" : ""
+            hotkeyStatusMenuItem.title = "Hotkeys: Active (\(tap)\(monitors)\(carbon))"
             hotkeyStatusMenuItem.isEnabled = false
         } else {
             hotkeyStatusMenuItem.title = "Hotkeys: Inactive - Retry"
@@ -301,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
-        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
+        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
         refreshAccessibilityMenuState()
 
         if !started {
