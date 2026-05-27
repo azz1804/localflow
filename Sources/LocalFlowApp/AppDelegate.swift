@@ -17,11 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingBarController: FloatingBarController?
     private var settingsWindowController: SettingsWindowController?
     private var accessibilityRetryTimer: Timer?
+    private var permissionRetryBaseline: (accessibility: Bool, inputMonitoring: Bool)?
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
     private let hotkeyStatusMenuItem = NSMenuItem(title: "Hotkeys: Starting", action: #selector(retryHotkeys), keyEquivalent: "")
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
+    private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -29,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
             setupMenuBar()
             setupControllers()
-            refreshAccessibilityMenuState()
+            refreshPermissionMenuState()
         } catch {
             setupMenuBar()
             showFatalError(error)
@@ -109,15 +111,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.dictationController?.toggleRecording()
         }
         let started = hotkeyController.start()
-        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
+        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
 
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
         self.hotkeyController = hotkeyController
-        refreshAccessibilityMenuState()
+        refreshPermissionMenuState()
+
+        if !PermissionManager.isAccessibilityTrusted(prompt: false) {
+            floatingBarController.update(status: .error("Enable Accessibility so LocalFlow can paste into the active app."), level: 0)
+            requestAccessibilityPermission()
+        }
 
         if !started {
-            scheduleHotkeyRetryAfterAccessibilityPrompt()
+            scheduleHotkeyRetryAfterPermissionPrompt()
+        } else if fnListenerNeedsInputMonitoring {
+            floatingBarController.update(status: .error("Enable Input Monitoring for Fn. Option+Space can be used meanwhile."), level: 0)
+            requestInputMonitoringPermission()
         }
     }
 
@@ -161,6 +171,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityMenuItem.target = self
         menu.addItem(accessibilityMenuItem)
 
+        inputMonitoringMenuItem.target = self
+        menu.addItem(inputMonitoringMenuItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit LocalFlow", action: #selector(quit), keyEquivalent: "q")
@@ -180,24 +193,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func refreshAccessibilityMenuState() {
-        let trusted = PermissionManager.isAccessibilityTrusted(prompt: false)
-        accessibilityMenuItem.title = trusted ? "Accessibility Permission Granted" : "Enable Accessibility Permission"
-        accessibilityMenuItem.isEnabled = !trusted
+    private func refreshPermissionMenuState() {
+        let accessibilityTrusted = PermissionManager.isAccessibilityTrusted(prompt: false)
+        accessibilityMenuItem.title = accessibilityTrusted ? "Accessibility Permission Granted" : "Enable Accessibility Permission"
+        accessibilityMenuItem.isEnabled = !accessibilityTrusted
+
+        let inputMonitoringTrusted = PermissionManager.isInputMonitoringTrusted()
+        inputMonitoringMenuItem.title = inputMonitoringTrusted ? "Input Monitoring Permission Granted" : "Enable Input Monitoring Permission"
+        inputMonitoringMenuItem.isEnabled = !inputMonitoringTrusted
+
         updateHotkeyStatusMenu()
     }
 
     private func updateHotkeyStatusMenu() {
+        if fnListenerNeedsInputMonitoring {
+            hotkeyStatusMenuItem.title = "Fn blocked - Enable Input Monitoring"
+            hotkeyStatusMenuItem.action = #selector(requestInputMonitoringPermission)
+            hotkeyStatusMenuItem.isEnabled = true
+            return
+        }
+
         if hotkeyController?.isRunning == true {
             let tap = hotkeyController?.activeTapDescription ?? "none"
             let monitors = hotkeyController?.monitorsAreInstalled == true ? "+monitor" : ""
             let carbon = hotkeyController?.carbonHotkeysAreRegistered == true ? "+carbon" : ""
             hotkeyStatusMenuItem.title = "Hotkeys: Active (\(tap)\(monitors)\(carbon))"
+            hotkeyStatusMenuItem.action = #selector(retryHotkeys)
             hotkeyStatusMenuItem.isEnabled = false
         } else {
             hotkeyStatusMenuItem.title = "Hotkeys: Inactive - Retry"
+            hotkeyStatusMenuItem.action = #selector(retryHotkeys)
             hotkeyStatusMenuItem.isEnabled = true
         }
+    }
+
+    private var fnListenerNeedsInputMonitoring: Bool {
+        let holdHotkey = configuration.holdHotkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return holdHotkey == "fn"
+            && hotkeyController?.activeTapDescription == "none"
+            && !PermissionManager.isInputMonitoringTrusted()
     }
 
     private func showFatalError(_ error: Error) {
@@ -261,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func requestAccessibilityPermission() {
         if PermissionManager.isAccessibilityTrusted(prompt: false) {
-            refreshAccessibilityMenuState()
+            refreshPermissionMenuState()
             if hotkeyController?.isRunning != true {
                 restartHotkeys()
             }
@@ -269,7 +303,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         _ = PermissionManager.isAccessibilityTrusted(prompt: true)
-        scheduleHotkeyRetryAfterAccessibilityPrompt()
+        scheduleHotkeyRetryAfterPermissionPrompt()
+    }
+
+    @objc private func requestInputMonitoringPermission() {
+        if PermissionManager.isInputMonitoringTrusted() {
+            refreshPermissionMenuState()
+            if hotkeyController?.activeTapDescription == "none" {
+                restartHotkeys()
+            }
+            return
+        }
+
+        LocalFlowLogger.log("Request input monitoring permission")
+        _ = PermissionManager.requestInputMonitoringAccess()
+        scheduleHotkeyRetryAfterPermissionPrompt()
     }
 
     @objc private func retryHotkeys() {
@@ -302,16 +350,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
-        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
-        refreshAccessibilityMenuState()
+        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
+        refreshPermissionMenuState()
 
         if !started {
-            scheduleHotkeyRetryAfterAccessibilityPrompt()
+            scheduleHotkeyRetryAfterPermissionPrompt()
         }
     }
 
-    private func scheduleHotkeyRetryAfterAccessibilityPrompt() {
+    private func scheduleHotkeyRetryAfterPermissionPrompt() {
         accessibilityRetryTimer?.invalidate()
+        permissionRetryBaseline = (
+            accessibility: PermissionManager.isAccessibilityTrusted(prompt: false),
+            inputMonitoring: PermissionManager.isInputMonitoringTrusted()
+        )
         accessibilityRetryTimer = Timer.scheduledTimer(
             timeInterval: 1.5,
             target: self,
@@ -322,13 +374,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func accessibilityRetryTimerFired(_ timer: Timer) {
-        refreshAccessibilityMenuState()
-        guard PermissionManager.isAccessibilityTrusted(prompt: false) else {
+        let accessibilityTrusted = PermissionManager.isAccessibilityTrusted(prompt: false)
+        let inputMonitoringTrusted = PermissionManager.isInputMonitoringTrusted()
+        refreshPermissionMenuState()
+        guard accessibilityTrusted != permissionRetryBaseline?.accessibility
+                || inputMonitoringTrusted != permissionRetryBaseline?.inputMonitoring else {
             return
         }
 
         timer.invalidate()
         accessibilityRetryTimer = nil
+        permissionRetryBaseline = nil
         restartHotkeys()
     }
 
@@ -389,6 +445,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         controller.onRequestAccessibility = { [weak self] in
             self?.requestAccessibilityPermission()
+        }
+
+        controller.onRequestInputMonitoring = { [weak self] in
+            self?.requestInputMonitoringPermission()
         }
 
         controller.onOpenSupportFolder = { [weak self] in

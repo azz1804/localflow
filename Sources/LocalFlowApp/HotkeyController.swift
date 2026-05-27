@@ -245,18 +245,24 @@ final class HotkeyController {
         }
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        for tapLocation in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
-            eventTap = CGEvent.tapCreate(
-                tap: tapLocation,
-                place: .headInsertEventTap,
-                options: .defaultTap,
-                eventsOfInterest: CGEventMask(eventMask),
-                callback: callback,
-                userInfo: refcon
-            )
+        for tapOption in [CGEventTapOptions.defaultTap, .listenOnly] {
+            for tapLocation in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
+                eventTap = CGEvent.tapCreate(
+                    tap: tapLocation,
+                    place: .headInsertEventTap,
+                    options: tapOption,
+                    eventsOfInterest: CGEventMask(eventMask),
+                    callback: callback,
+                    userInfo: refcon
+                )
+
+                if eventTap != nil {
+                    activeTapDescription = "\(Self.description(for: tapLocation))-\(Self.description(for: tapOption))"
+                    break
+                }
+            }
 
             if eventTap != nil {
-                activeTapDescription = Self.description(for: tapLocation)
                 break
             }
         }
@@ -615,6 +621,17 @@ final class HotkeyController {
             return "session"
         case .cgAnnotatedSessionEventTap:
             return "annotated-session"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private static func description(for tapOption: CGEventTapOptions) -> String {
+        switch tapOption {
+        case .defaultTap:
+            return "active"
+        case .listenOnly:
+            return "listen"
         @unknown default:
             return "unknown"
         }

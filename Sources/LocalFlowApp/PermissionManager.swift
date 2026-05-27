@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreGraphics
 
 @MainActor
 enum PermissionManager {
@@ -14,5 +15,14 @@ enum PermissionManager {
     static func isAccessibilityTrusted(prompt: Bool) -> Bool {
         let options = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
+    }
+
+    static func isInputMonitoringTrusted() -> Bool {
+        CGPreflightListenEventAccess()
+    }
+
+    @discardableResult
+    static func requestInputMonitoringAccess() -> Bool {
+        CGRequestListenEventAccess()
     }
 }

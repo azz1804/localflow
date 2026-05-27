@@ -74,7 +74,21 @@ if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then
 fi
 
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+  CODESIGN_IDENTITY="${LOCALFLOW_CODESIGN_IDENTITY:--}"
+  CODESIGN_KEYCHAIN="${LOCALFLOW_CODESIGN_KEYCHAIN:-}"
+  CODESIGN_REQUIREMENTS="${LOCALFLOW_CODESIGN_REQUIREMENTS:-=designated => identifier \"local.localflow.app\"}"
+
+  codesign_args=(--force --deep --sign "$CODESIGN_IDENTITY")
+  if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
+    codesign_args+=(--keychain "$CODESIGN_KEYCHAIN")
+  fi
+  if [[ -n "$CODESIGN_REQUIREMENTS" ]]; then
+    codesign_args+=(--requirements "$CODESIGN_REQUIREMENTS")
+  fi
+
+  codesign "${codesign_args[@]}" "$APP_DIR" >/dev/null 2>&1 \
+    || codesign --force --deep --sign - --requirements '=designated => identifier "local.localflow.app"' "$APP_DIR" >/dev/null 2>&1 \
+    || true
 fi
 
 echo "$APP_DIR"

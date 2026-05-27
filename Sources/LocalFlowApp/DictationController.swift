@@ -89,6 +89,7 @@ final class DictationController {
         }
 
         guard openAIClient != nil else {
+            LocalFlowLogger.log("Recording start failed missing OpenAI key")
             setStatus(.error("Missing OPENAI_API_KEY in .env"), level: 0)
             return
         }
@@ -98,12 +99,15 @@ final class DictationController {
         do {
             recordingTargetApplication = activeApplicationProvider.currentApplication()
             recordingStartedAt = Date()
+            LocalFlowLogger.log("Recording start target=\(recordingTargetApplication?.bundleIdentifier ?? "-")")
             try await audioRecorder.start()
             isStarting = false
             setStatus(.recording(0), level: 0.1)
             startRecordingStatusLoop()
+            LocalFlowLogger.log("Recording started")
         } catch {
             isStarting = false
+            LocalFlowLogger.log("Recording start failed error=\(error.localizedDescription)")
             setStatus(.error(error.localizedDescription), level: 0)
         }
     }
@@ -120,13 +124,16 @@ final class DictationController {
 
         do {
             result = try audioRecorder.stop()
+            LocalFlowLogger.log("Recording stopped duration=\(String(format: "%.2f", result.durationSeconds))")
         } catch {
+            LocalFlowLogger.log("Recording stop failed error=\(error.localizedDescription)")
             setStatus(.error(error.localizedDescription), level: 0)
             return
         }
 
         guard result.durationSeconds >= 0.25 else {
             removeTemporaryFile(result.fileURL)
+            LocalFlowLogger.log("Recording discarded tooShort duration=\(String(format: "%.2f", result.durationSeconds))")
             setStatus(.error("Recording was too short."), level: 0)
             return
         }
@@ -142,6 +149,7 @@ final class DictationController {
 
         isProcessing = true
         setStatus(.processing, level: 0)
+        LocalFlowLogger.log("Processing started duration=\(String(format: "%.2f", result.durationSeconds))")
 
         let targetApplication = recordingTargetApplication
         let transcriptionPrompt = PromptBuilder.transcriptionPrompt(
@@ -157,6 +165,7 @@ final class DictationController {
                 language: configuration.transcriptionLanguage,
                 prompt: transcriptionPrompt
             )
+            LocalFlowLogger.log("Transcription finished chars=\(transcribedText.count)")
 
             var finalText = ReplacementEngine.apply(dictionary.replacements, to: transcribedText)
             var polished = false
@@ -186,9 +195,11 @@ final class DictationController {
                 restoreClipboard: configuration.restoreClipboardAfterPaste,
                 restoreDelayMilliseconds: configuration.pasteRestoreDelayMilliseconds
             )
+            LocalFlowLogger.log("Paste finished chars=\(finalText.count)")
 
             setStatus(.done(finalText), level: 0)
         } catch {
+            LocalFlowLogger.log("Processing failed error=\(error.localizedDescription)")
             setStatus(.error(error.localizedDescription), level: 0)
         }
 

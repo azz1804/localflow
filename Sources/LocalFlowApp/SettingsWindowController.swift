@@ -8,6 +8,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     var onClearHistory: (() -> Result<Void, Error>)?
     var onRefresh: (() -> Void)?
     var onRequestAccessibility: (() -> Void)?
+    var onRequestInputMonitoring: (() -> Void)?
     var onOpenSupportFolder: (() -> Void)?
 
     private var configuration = AppConfiguration()
@@ -29,6 +30,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private let restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Restore clipboard after paste", target: nil, action: nil)
     private let pasteDelayField = NSTextField()
     private let accessibilityStatusLabel = NSTextField(labelWithString: "")
+    private let inputMonitoringStatusLabel = NSTextField(labelWithString: "")
     private let envPathLabel = NSTextField(labelWithString: "")
     private let dictionaryPathLabel = NSTextField(labelWithString: "")
 
@@ -85,6 +87,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         pasteDelayField.stringValue = String(configuration.pasteRestoreDelayMilliseconds)
 
         accessibilityStatusLabel.stringValue = PermissionManager.isAccessibilityTrusted(prompt: false) ? "Granted" : "Missing"
+        inputMonitoringStatusLabel.stringValue = PermissionManager.isInputMonitoringTrusted() ? "Granted" : "Missing"
         envPathLabel.stringValue = envSource?.path ?? appSupportURL.appendingPathComponent(".env").path
         dictionaryPathLabel.stringValue = dictionarySource?.path ?? appSupportURL.appendingPathComponent("dictionary.json").path
 
@@ -233,6 +236,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         stack.addArrangedSubview(separator())
         stack.addArrangedSubview(sectionTitle("Permissions and files"))
         stack.addArrangedSubview(row("Accessibility", accessibilityStatusLabel))
+        stack.addArrangedSubview(row("Input Monitoring", inputMonitoringStatusLabel))
         stack.addArrangedSubview(pathRow("Config", envPathLabel))
         stack.addArrangedSubview(pathRow("Dictionary", dictionaryPathLabel))
 
@@ -242,6 +246,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         buttons.alignment = .centerY
         buttons.addArrangedSubview(button("Save Settings", action: #selector(saveSettings)))
         buttons.addArrangedSubview(button("Request Accessibility", action: #selector(requestAccessibility)))
+        buttons.addArrangedSubview(button("Request Input Monitoring", action: #selector(requestInputMonitoring)))
         buttons.addArrangedSubview(button("Open Support Folder", action: #selector(openSupportFolder)))
         buttons.addArrangedSubview(NSView())
         stack.addArrangedSubview(buttons)
@@ -481,6 +486,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func requestAccessibility() {
         onRequestAccessibility?()
         accessibilityStatusLabel.stringValue = PermissionManager.isAccessibilityTrusted(prompt: false) ? "Granted" : "Missing"
+    }
+
+    @objc private func requestInputMonitoring() {
+        onRequestInputMonitoring?()
+        inputMonitoringStatusLabel.stringValue = PermissionManager.isInputMonitoringTrusted() ? "Granted" : "Missing"
     }
 
     @objc private func openSupportFolder() {

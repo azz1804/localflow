@@ -34,7 +34,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 ./Scripts/run_app.sh
 ```
 
-The first launch will require Microphone permission. Global hotkeys and automatic paste require Accessibility permission. If macOS does not show the Accessibility prompt, open:
+The first launch will require Microphone permission. Automatic paste requires Accessibility permission. `Fn` and other global key listeners require Input Monitoring permission. If macOS does not show the Accessibility prompt, open:
 
 ```text
 System Settings > Privacy & Security > Accessibility
@@ -42,13 +42,11 @@ System Settings > Privacy & Security > Accessibility
 
 Then enable LocalFlow. If it appears twice after rebuilds, remove the old entry and add the latest app bundle again.
 
-On some macOS versions, global hotkeys also require:
-
 ```text
 System Settings > Privacy & Security > Input Monitoring
 ```
 
-Enable LocalFlow there too if `Fn` or `Option+Space` does nothing while the app is running.
+Enable LocalFlow there too if `Fn` does nothing while the app is running. `Option+Space` is registered through the Carbon hotkey API as a reliable fallback, but `Fn` still needs Input Monitoring.
 
 To install or update the app in `/Applications`, use the install script. It quits any running LocalFlow process before replacing the bundle:
 
@@ -84,8 +82,10 @@ Menu bar items:
 - `Reload .env and Dictionary`: reloads config, dictionary and hotkeys without rebuilding.
 - `Open Support Folder`: opens the runtime folder that contains `dictionary.json` and `history.jsonl`.
 - `Hotkeys: Active`: confirms the global keyboard hook is running.
+- `Fn blocked - Enable Input Monitoring`: LocalFlow can run, but macOS is blocking the `Fn` listener.
 - `Hotkeys: Inactive - Retry`: retries installing the global keyboard hook.
 - `Request Accessibility Permission`: triggers the macOS permission prompt again.
+- `Request Input Monitoring Permission`: triggers the macOS keyboard-listener permission prompt.
 
 ## Graphical interface
 
@@ -145,7 +145,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 8 unit tests passing.
+- `swift test`: 10 unit tests passing.
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.
@@ -154,11 +154,11 @@ Live transcription was not exercised here because no real `.env` with `OPENAI_AP
 
 ## Troubleshooting
 
-- No text is pasted: check Accessibility permission.
+- No text is pasted after transcription: check Accessibility permission.
 - Recording fails immediately: check Microphone permission.
-- `Fn` does nothing: use `Option+Space` or change `HOLD_HOTKEY` / `FALLBACK_HOLD_HOTKEY` in `.env`.
+- `Fn` does nothing: enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`, then click `LF > Hotkeys: Inactive - Retry` or restart LocalFlow.
+- `Option+Space` does nothing: open `LF > Hotkeys...` and check `~/Library/Application Support/LocalFlow/localflow.log`.
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
-- `Fn` does nothing: click `LF > Hotkeys: Inactive - Retry` if visible. If it stays inactive, remove LocalFlow from `System Settings > Privacy & Security > Accessibility`, run `./Scripts/install_app.sh`, then enable the new LocalFlow entry.
-- If the menu says `Hotkeys: Active` but keys still do nothing, also enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`.
+- If macOS shows LocalFlow as enabled but LocalFlow still reports missing permission, remove the old LocalFlow entry from that permission pane, run `./Scripts/install_app.sh`, and add `/Applications/LocalFlow.app` again.
 - Diagnostics are written to `~/Library/Application Support/LocalFlow/localflow.log`.

@@ -1,6 +1,17 @@
 import AppKit
 import Foundation
 
+enum TextInsertionError: LocalizedError {
+    case accessibilityPermissionMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .accessibilityPermissionMissing:
+            return "Accessibility permission is required to paste into the active app."
+        }
+    }
+}
+
 struct ClipboardSnapshot {
     var items: [[NSPasteboard.PasteboardType: Data]]
 }
@@ -12,6 +23,11 @@ final class TextInsertionService {
         restoreClipboard: Bool,
         restoreDelayMilliseconds: Int
     ) async throws {
+        guard PermissionManager.isAccessibilityTrusted(prompt: false) else {
+            _ = PermissionManager.isAccessibilityTrusted(prompt: true)
+            throw TextInsertionError.accessibilityPermissionMissing
+        }
+
         let pasteboard = NSPasteboard.general
         let snapshot = restoreClipboard ? capture(pasteboard: pasteboard) : nil
 
