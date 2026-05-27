@@ -37,6 +37,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <string>6.0</string>
   <key>CFBundleName</key>
   <string>LocalFlow</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -63,6 +65,10 @@ if [[ -f "$ROOT_DIR/Config/dictionary.json" ]]; then
   cp "$ROOT_DIR/Config/dictionary.json" "$RESOURCES_DIR/dictionary.json"
 else
   cp "$ROOT_DIR/Config/dictionary.example.json" "$RESOURCES_DIR/dictionary.json"
+fi
+
+if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then
+  cp "$ROOT_DIR/Assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi
 
 if command -v codesign >/dev/null 2>&1; then
