@@ -17,24 +17,73 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - Automatic paste into the active app through a temporary clipboard.
 - Local text-only history with retention pruning.
 
-## Setup
+## Install from source
 
-1. Copy `.env.example` to `.env`.
-2. Set `OPENAI_API_KEY`.
-3. Optionally copy `Config/dictionary.example.json` to `Config/dictionary.json` and edit your terms.
-4. Build the app:
+Prerequisites:
 
-```bash
-./Scripts/build_app.sh
-```
+- macOS 13 or later.
+- Xcode or Xcode Command Line Tools.
+- An OpenAI API key.
 
-5. Run it:
+Clone the repository, then create a local `.env` file:
 
 ```bash
-./Scripts/run_app.sh
+git clone <repo-url> LocalFlow
+cd LocalFlow
+cp .env.example .env
 ```
 
-The first launch will require Microphone permission. Automatic paste requires Accessibility permission. `Fn` and other global key listeners require Input Monitoring permission. If macOS does not show the Accessibility prompt, open:
+Edit `.env` and set your own key:
+
+```text
+OPENAI_API_KEY=sk-your-key
+```
+
+Optionally copy the example dictionary and add your own terms:
+
+```bash
+cp Config/dictionary.example.json Config/dictionary.json
+```
+
+Install LocalFlow into `/Applications`:
+
+```bash
+./Scripts/install_app.sh
+```
+
+The install script builds the app, copies it to `/Applications/LocalFlow.app`, removes any stale `~/Applications/LocalFlow.app`, then launches the installed app.
+
+On first install, if the repository contains `.env` and the runtime config does not exist yet, the script copies:
+
+```text
+~/LocalFlow/.env
+```
+
+to:
+
+```text
+~/Library/Application Support/LocalFlow/.env
+```
+
+The `.env` file is not copied into `/Applications/LocalFlow.app`.
+
+Alternative: you can install first, then open `LF > Open LocalFlow > Settings`, paste your OpenAI key there, and click `Save Settings`. This creates or updates:
+
+```text
+~/Library/Application Support/LocalFlow/.env
+```
+
+For a user-local install instead of a global install:
+
+```bash
+./Scripts/install_app.sh ~/Applications
+```
+
+## Permissions
+
+The first launch will require Microphone permission. Automatic paste requires Accessibility permission. `Fn` and other global key listeners require Input Monitoring permission.
+
+If macOS does not show the Accessibility prompt, open:
 
 ```text
 System Settings > Privacy & Security > Accessibility
@@ -42,25 +91,13 @@ System Settings > Privacy & Security > Accessibility
 
 Then enable LocalFlow. If it appears twice after rebuilds, remove the old entry and add the latest app bundle again.
 
+Also open:
+
 ```text
 System Settings > Privacy & Security > Input Monitoring
 ```
 
 Enable LocalFlow there too if `Fn` does nothing while the app is running. `Option+Space` is registered through the Carbon hotkey API as a reliable fallback, but `Fn` still needs Input Monitoring.
-
-To install or update the app in `/Applications`, use the install script. It quits any running LocalFlow process before replacing the bundle:
-
-```bash
-./Scripts/install_app.sh
-```
-
-When installing to `/Applications`, the script also removes `~/Applications/LocalFlow.app` so Spotlight does not launch an older duplicate.
-
-For a user-local install:
-
-```bash
-./Scripts/install_app.sh ~/Applications
-```
 
 ## Usage
 
@@ -68,7 +105,7 @@ For a user-local install:
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Control+Option+Space` to start/stop toggle recording.
 - Use the menu bar icon for manual start/stop, settings, local data folder and quit.
-- Edit `.env`, then use `Reload .env and Dictionary` from the menu bar or restart the app.
+- Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Reload .env and Dictionary` from the menu bar or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Reload .env and Dictionary`.
 - `Config/dictionary.json` is the project-side fallback copied into the app bundle during build.
 
@@ -121,11 +158,14 @@ At runtime, LocalFlow stores editable/runtime data in:
 
 Files:
 
-- `.env` if you choose to place config there.
+- `.env` for local config and `OPENAI_API_KEY`.
 - `dictionary.json` for terms and replacement rules.
 - `history.jsonl` for text-only dictation history.
+- `localflow.log` for diagnostics.
 
 Audio files are temporary and removed after processing.
+
+Do not edit files inside `/Applications/LocalFlow.app` directly. That app bundle is replaced on every install. Editable user data belongs in `~/Library/Application Support/LocalFlow/`.
 
 ## Testing
 
@@ -154,7 +194,7 @@ Manual smoke test:
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.
 
-Live transcription was not exercised here because no real `.env` with `OPENAI_API_KEY` is present in the workspace.
+Live transcription requires a valid `OPENAI_API_KEY` in `~/Library/Application Support/LocalFlow/.env`.
 
 ## Troubleshooting
 
