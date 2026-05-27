@@ -448,9 +448,9 @@ final class HotkeyController {
             if isDown != fnIsDown {
                 fnIsDown = isDown
                 if isDown {
-                    onHoldStart?()
+                    startHold(source: "fn-cg-flags")
                 } else {
-                    onHoldEnd?()
+                    endHold(source: "fn-cg-flags")
                 }
                 return nil
             }
@@ -465,20 +465,20 @@ final class HotkeyController {
         if let holdSpec, holdSpec.matchesFnKeyEvent(event), !isRepeat {
             if !fnIsDown {
                 fnIsDown = true
-                onHoldStart?()
+                startHold(source: "fn-cg-key")
             }
             return nil
         }
 
         if let toggleSpec, toggleSpec.matchesKeyEvent(event), !isRepeat {
-            triggerToggleIfNeeded()
+            triggerToggleIfNeeded(source: "toggle-cg-key")
             return nil
         }
 
         if let fallbackHoldSpec, fallbackHoldSpec.matchesKeyEvent(event), !isRepeat {
             if !holdFallbackIsDown {
                 holdFallbackIsDown = true
-                onHoldStart?()
+                startHold(source: "fallback-cg-key")
             }
             return nil
         }
@@ -490,7 +490,7 @@ final class HotkeyController {
         if let holdSpec, holdSpec.matchesFnKeyEvent(event) {
             if fnIsDown {
                 fnIsDown = false
-                onHoldEnd?()
+                endHold(source: "fn-cg-key")
             }
             return nil
         }
@@ -498,7 +498,7 @@ final class HotkeyController {
         if let fallbackHoldSpec, fallbackHoldSpec.matchesKeyEvent(event) {
             if holdFallbackIsDown {
                 holdFallbackIsDown = false
-                onHoldEnd?()
+                endHold(source: "fallback-cg-key")
             }
             return nil
         }
@@ -524,9 +524,9 @@ final class HotkeyController {
             if isDown != fnIsDown {
                 fnIsDown = isDown
                 if isDown {
-                    onHoldStart?()
+                    startHold(source: "fn-nsevent-flags")
                 } else {
-                    onHoldEnd?()
+                    endHold(source: "fn-nsevent-flags")
                 }
                 return true
             }
@@ -543,20 +543,20 @@ final class HotkeyController {
         if let holdSpec, holdSpec.matchesFnKeyEvent(snapshot) {
             if !fnIsDown {
                 fnIsDown = true
-                onHoldStart?()
+                startHold(source: "fn-nsevent-key")
             }
             return true
         }
 
         if let toggleSpec, toggleSpec.matchesKeyEvent(snapshot) {
-            triggerToggleIfNeeded()
+            triggerToggleIfNeeded(source: "toggle-nsevent-key")
             return true
         }
 
         if let fallbackHoldSpec, fallbackHoldSpec.matchesKeyEvent(snapshot) {
             if !holdFallbackIsDown {
                 holdFallbackIsDown = true
-                onHoldStart?()
+                startHold(source: "fallback-nsevent-key")
             }
             return true
         }
@@ -564,13 +564,24 @@ final class HotkeyController {
         return false
     }
 
-    private func triggerToggleIfNeeded() {
+    private func startHold(source: String) {
+        LocalFlowLogger.log("Hotkey hold start source=\(source)")
+        onHoldStart?()
+    }
+
+    private func endHold(source: String) {
+        LocalFlowLogger.log("Hotkey hold end source=\(source)")
+        onHoldEnd?()
+    }
+
+    private func triggerToggleIfNeeded(source: String) {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastToggleTime > 0.25 else {
             return
         }
 
         lastToggleTime = now
+        LocalFlowLogger.log("Hotkey toggle source=\(source)")
         onToggle?()
     }
 
@@ -579,15 +590,15 @@ final class HotkeyController {
         case (Self.carbonFallbackHoldID, UInt32(kEventHotKeyPressed)):
             if !holdFallbackIsDown {
                 holdFallbackIsDown = true
-                onHoldStart?()
+                startHold(source: "fallback-carbon")
             }
         case (Self.carbonFallbackHoldID, UInt32(kEventHotKeyReleased)):
             if holdFallbackIsDown {
                 holdFallbackIsDown = false
-                onHoldEnd?()
+                endHold(source: "fallback-carbon")
             }
         case (Self.carbonToggleID, UInt32(kEventHotKeyPressed)):
-            triggerToggleIfNeeded()
+            triggerToggleIfNeeded(source: "toggle-carbon")
         default:
             break
         }
@@ -597,7 +608,7 @@ final class HotkeyController {
         if let holdSpec, holdSpec.matchesFnKeyEvent(snapshot) {
             if fnIsDown {
                 fnIsDown = false
-                onHoldEnd?()
+                endHold(source: "fn-nsevent-key")
             }
             return true
         }
@@ -605,7 +616,7 @@ final class HotkeyController {
         if let fallbackHoldSpec, fallbackHoldSpec.matchesKeyEvent(snapshot) {
             if holdFallbackIsDown {
                 holdFallbackIsDown = false
-                onHoldEnd?()
+                endHold(source: "fallback-nsevent-key")
             }
             return true
         }

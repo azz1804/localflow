@@ -23,6 +23,7 @@ final class DictationController {
     private var recordingTask: Task<Void, Never>?
     private var isStarting = false
     private var isProcessing = false
+    private var shouldStopWhenStarted = false
 
     init(
         configuration: AppConfiguration,
@@ -61,10 +62,22 @@ final class DictationController {
     }
 
     func endHoldRecording() {
+        if isStarting {
+            shouldStopWhenStarted = true
+            LocalFlowLogger.log("Recording stop queued while recorder is starting")
+            return
+        }
+
         Task { await stopAndProcessRecording() }
     }
 
     func toggleRecording() {
+        if isStarting {
+            shouldStopWhenStarted = true
+            LocalFlowLogger.log("Recording toggle stop queued while recorder is starting")
+            return
+        }
+
         switch status {
         case .recording:
             Task { await stopAndProcessRecording() }
@@ -80,6 +93,12 @@ final class DictationController {
     }
 
     func stopManualRecording() {
+        if isStarting {
+            shouldStopWhenStarted = true
+            LocalFlowLogger.log("Manual stop queued while recorder is starting")
+            return
+        }
+
         Task { await stopAndProcessRecording() }
     }
 
@@ -95,18 +114,29 @@ final class DictationController {
         }
 
         isStarting = true
+        shouldStopWhenStarted = false
+        setStatus(.recording(0), level: 0.1)
 
         do {
             recordingTargetApplication = activeApplicationProvider.currentApplication()
-            recordingStartedAt = Date()
             LocalFlowLogger.log("Recording start target=\(recordingTargetApplication?.bundleIdentifier ?? "-")")
             try await audioRecorder.start()
+            recordingStartedAt = Date()
             isStarting = false
+            LocalFlowLogger.log("Recording started")
+
+            if shouldStopWhenStarted {
+                shouldStopWhenStarted = false
+                LocalFlowLogger.log("Recording stopping immediately after delayed start")
+                await stopAndProcessRecording()
+                return
+            }
+
             setStatus(.recording(0), level: 0.1)
             startRecordingStatusLoop()
-            LocalFlowLogger.log("Recording started")
         } catch {
             isStarting = false
+            shouldStopWhenStarted = false
             LocalFlowLogger.log("Recording start failed error=\(error.localizedDescription)")
             setStatus(.error(error.localizedDescription), level: 0)
         }

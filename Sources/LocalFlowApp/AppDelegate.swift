@@ -99,15 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         hotkeyController.onHoldStart = { [weak self] in
-            LocalFlowLogger.log("Hotkey hold start")
             self?.dictationController?.beginHoldRecording()
         }
         hotkeyController.onHoldEnd = { [weak self] in
-            LocalFlowLogger.log("Hotkey hold end")
             self?.dictationController?.endHoldRecording()
         }
         hotkeyController.onToggle = { [weak self] in
-            LocalFlowLogger.log("Hotkey toggle")
             self?.dictationController?.toggleRecording()
         }
         let started = hotkeyController.start()
@@ -337,15 +334,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleHotkey: configuration.toggleHotkey
         )
         hotkeyController.onHoldStart = { [weak dictationController] in
-            LocalFlowLogger.log("Hotkey hold start")
             dictationController?.beginHoldRecording()
         }
         hotkeyController.onHoldEnd = { [weak dictationController] in
-            LocalFlowLogger.log("Hotkey hold end")
             dictationController?.endHoldRecording()
         }
         hotkeyController.onToggle = { [weak dictationController] in
-            LocalFlowLogger.log("Hotkey toggle")
             dictationController?.toggleRecording()
         }
         let started = hotkeyController.start()
