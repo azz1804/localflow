@@ -104,6 +104,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
+- While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Diagnostics > Reload Config and Dictionary`.

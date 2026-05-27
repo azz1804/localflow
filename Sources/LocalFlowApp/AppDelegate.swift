@@ -92,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationController.onStatusChanged = { [weak self] status, level in
             self?.floatingBarController?.update(status: status, level: level)
             self?.updateMenu(for: status)
+            if case .recording = status {
+                return
+            }
+            self?.hotkeyController?.clearToggleRecordingState()
         }
 
         let hotkeyController = HotkeyController(
