@@ -110,6 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onHoldEnd = { [weak self] in
             self?.dictationController?.endHoldRecording()
         }
+        hotkeyController.onHoldLocked = { [weak self] in
+            self?.dictationController?.lockCurrentHoldRecording()
+        }
         hotkeyController.onToggle = { [weak self] in
             self?.dictationController?.toggleRecording()
         }
@@ -358,6 +361,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyController.onHoldEnd = { [weak dictationController] in
             dictationController?.endHoldRecording()
+        }
+        hotkeyController.onHoldLocked = { [weak dictationController] in
+            dictationController?.lockCurrentHoldRecording()
         }
         hotkeyController.onToggle = { [weak dictationController] in
             dictationController?.toggleRecording()

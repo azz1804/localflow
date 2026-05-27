@@ -208,6 +208,7 @@ struct HotkeyEventSnapshot: Sendable {
 final class HotkeyController {
     var onHoldStart: (() -> Void)?
     var onHoldEnd: (() -> Void)?
+    var onHoldLocked: (() -> Void)?
     var onToggle: (() -> Void)?
     var onDiagnosticEvent: ((String) -> Void)?
 
@@ -796,6 +797,7 @@ final class HotkeyController {
         toggleRecordingIsActive = true
         LocalFlowLogger.log("Hotkey hold locked source=\(source) holdSource=\(holdSource)")
         onDiagnosticEvent?("hold locked: \(Self.displayName(for: source))")
+        onHoldLocked?()
     }
 
     private func triggerToggleIfNeeded(source: String) {

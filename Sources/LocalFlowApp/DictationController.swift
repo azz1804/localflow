@@ -24,6 +24,7 @@ final class DictationController {
     private var isStarting = false
     private var isProcessing = false
     private var shouldStopWhenStarted = false
+    private var recordingMode: RecordingMode = .hold
 
     init(
         configuration: AppConfiguration,
@@ -58,10 +59,14 @@ final class DictationController {
     }
 
     func beginHoldRecording() {
-        Task { await startRecording() }
+        Task { await startRecording(mode: .hold) }
     }
 
     func endHoldRecording() {
+        guard recordingMode == .hold else {
+            return
+        }
+
         if isStarting {
             shouldStopWhenStarted = true
             LocalFlowLogger.log("Recording stop queued while recorder is starting")
@@ -82,14 +87,24 @@ final class DictationController {
         case .recording:
             Task { await stopAndProcessRecording() }
         case .idle, .done, .error:
-            Task { await startRecording() }
+            Task { await startRecording(mode: .toggle) }
         case .processing:
             break
         }
     }
 
+    func lockCurrentHoldRecording() {
+        guard audioRecorder.isRecording, recordingMode == .hold else {
+            return
+        }
+
+        recordingMode = .toggle
+        LocalFlowLogger.log("Recording locked into toggle mode")
+        refreshRecordingStatus()
+    }
+
     func startManualRecording() {
-        Task { await startRecording() }
+        Task { await startRecording(mode: .toggle) }
     }
 
     func stopManualRecording() {
@@ -102,7 +117,7 @@ final class DictationController {
         Task { await stopAndProcessRecording() }
     }
 
-    private func startRecording() async {
+    private func startRecording(mode: RecordingMode) async {
         guard !isStarting, !isProcessing, !audioRecorder.isRecording else {
             return
         }
@@ -115,7 +130,8 @@ final class DictationController {
 
         isStarting = true
         shouldStopWhenStarted = false
-        setStatus(.recording(0), level: 0.1)
+        recordingMode = mode
+        setStatus(.recording(0, recordingMode), level: 0.1)
 
         do {
             recordingTargetApplication = activeApplicationProvider.currentApplication()
@@ -132,7 +148,7 @@ final class DictationController {
                 return
             }
 
-            setStatus(.recording(0), level: 0.1)
+            setStatus(.recording(0, recordingMode), level: 0.1)
             startRecordingStatusLoop()
         } catch {
             isStarting = false
@@ -236,6 +252,7 @@ final class DictationController {
         isProcessing = false
         recordingTargetApplication = nil
         recordingStartedAt = nil
+        recordingMode = .hold
         removeTemporaryFile(result.fileURL)
     }
 
@@ -257,7 +274,7 @@ final class DictationController {
         }
 
         let duration = Date().timeIntervalSince(recordingStartedAt)
-        setStatus(.recording(duration), level: audioRecorder.currentPowerLevel())
+        setStatus(.recording(duration, recordingMode), level: audioRecorder.currentPowerLevel())
     }
 
     private func setStatus(_ status: AppStatus, level: Float) {

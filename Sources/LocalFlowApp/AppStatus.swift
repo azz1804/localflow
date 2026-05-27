@@ -1,8 +1,13 @@
 import Foundation
 
+enum RecordingMode: Equatable {
+    case hold
+    case toggle
+}
+
 enum AppStatus: Equatable {
     case idle
-    case recording(TimeInterval)
+    case recording(TimeInterval, RecordingMode)
     case processing
     case done(String)
     case error(String)
@@ -11,8 +16,10 @@ enum AppStatus: Equatable {
         switch self {
         case .idle:
             return "Ready"
-        case let .recording(duration):
+        case let .recording(duration, .hold):
             return String(format: "Recording %.1fs", duration)
+        case let .recording(duration, .toggle):
+            return String(format: "Toggle recording %.1fs", duration)
         case .processing:
             return "Processing"
         case .done:

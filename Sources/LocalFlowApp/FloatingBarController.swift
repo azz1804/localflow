@@ -94,8 +94,10 @@ final class FloatingBarView: NSView {
         switch status {
         case .idle:
             color = .systemGray
-        case .recording:
+        case .recording(_, .hold):
             color = .systemRed
+        case .recording(_, .toggle):
+            color = .systemPurple
         case .processing:
             color = .systemBlue
         case .done:
@@ -133,8 +135,10 @@ final class FloatingBarView: NSView {
         } else {
             let subtitle: String
             switch status {
-            case .recording:
-                subtitle = "Release the hotkey to paste"
+            case .recording(_, .hold):
+                subtitle = "Release Fn to paste - Space locks toggle"
+            case .recording(_, .toggle):
+                subtitle = "Press Fn+Space to stop and paste"
             case .processing:
                 subtitle = "Transcribing with OpenAI"
             default:
@@ -149,7 +153,7 @@ final class FloatingBarView: NSView {
     }
 
     private func drawWaveform(in bounds: NSRect) {
-        guard case .recording = status else {
+        guard case let .recording(_, mode) = status else {
             return
         }
 
@@ -158,7 +162,8 @@ final class FloatingBarView: NSView {
         let centerY: CGFloat = 32
         let normalized = CGFloat(max(0.08, min(1, level)))
 
-        NSColor.systemRed.withAlphaComponent(0.85).setFill()
+        let color: NSColor = mode == .toggle ? .systemPurple : .systemRed
+        color.withAlphaComponent(0.85).setFill()
 
         for index in 0..<barCount {
             let phase = CGFloat(index % 4) / 4
