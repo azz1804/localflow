@@ -56,6 +56,8 @@ To install or update the app in `/Applications`, use the install script. It quit
 ./Scripts/install_app.sh
 ```
 
+When installing to `/Applications`, the script also removes `~/Applications/LocalFlow.app` so Spotlight does not launch an older duplicate.
+
 For a user-local install:
 
 ```bash
