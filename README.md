@@ -104,9 +104,9 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
-- Use the menu bar icon for manual start/stop, settings, local data folder and quit.
-- Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Reload .env and Dictionary` from the menu bar or restart the app.
-- Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Reload .env and Dictionary`.
+- Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
+- Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
+- Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Diagnostics > Reload Config and Dictionary`.
 - `Config/dictionary.json` is the project-side fallback copied into the app bundle during build.
 
 ## Settings
@@ -116,17 +116,7 @@ Menu bar items:
 - `Start Recording` / `Stop Recording`: manual recording control.
 - `Polish Dictation`: toggles the optional post-processing pass for the current session.
 - `Open LocalFlow`: opens the graphical interface.
-- `Reload .env and Dictionary`: reloads config, dictionary and hotkeys without rebuilding.
-- `Open Local Data Folder`: opens the runtime folder that contains `.env`, `dictionary.json`, `history.jsonl` and `localflow.log`.
-- `Hotkeys: Active`: confirms the global keyboard hooks are running. `+hid` means the low-level Fn/Globe listener is active.
-- `Last hotkey`: shows the latest real hotkey event LocalFlow received, including whether it came from `Fn` or `Option+Space`.
-- `Fn blocked - Enable Input Monitoring`: LocalFlow can run, but macOS is blocking the `Fn` listener.
-- `Hotkeys: Inactive - Retry`: retries installing the global keyboard hook.
-- `Request Accessibility Permission`: triggers the macOS permission prompt again.
-- `Request Input Monitoring Permission`: triggers the macOS keyboard-listener permission prompt.
-- `Fn/Globe macOS action`: shows whether macOS is already using the Fn/Globe key for another action.
-- `Set Fn/Globe to Do Nothing`: writes `AppleFnUsageType=0`; restart your Mac for the system setting to fully apply.
-- `Open Diagnostic Log`: opens the runtime log used to debug hotkey, recording, transcription and paste events.
+- `Quit LocalFlow`: quits the background app.
 
 ## Graphical interface
 
@@ -135,6 +125,7 @@ Open it from `LF > Open LocalFlow`.
 - `Settings`: edit the OpenAI key, models, language, hotkeys, polish, clipboard restore and history retention.
 - `History`: browse recent dictated messages, inspect raw/final text, copy any item with its row-level `Copy` button, or clear local history.
 - `Dictionary`: edit vocabulary terms and replacement rules. Terms are one per line. Replacements use `spoken phrase = final text`.
+- `Diagnostics`: inspect hotkey status, permissions, file paths, logs and reload config/dictionary without rebuilding.
 
 Settings are saved to:
 
@@ -200,10 +191,9 @@ Live transcription requires a valid `OPENAI_API_KEY` in `~/Library/Application S
 
 - No text is pasted after transcription: check Accessibility permission.
 - Recording fails immediately: check Microphone permission.
-- `Fn` does nothing: enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`, then click `LF > Hotkeys: Inactive - Retry` or restart LocalFlow.
-- If `Fn/Globe macOS action` is not `Do Nothing`, use `Set Fn/Globe to Do Nothing`, restart the Mac, then test `Fn` again.
-- After pressing `Fn`, open the menu and check `Last hotkey`. `Fn via HID` means LocalFlow caught it through the low-level listener; if it still says `none`, macOS did not deliver the key event to LocalFlow.
-- `Option+Space` does nothing: open `LF > Hotkeys...` and check `~/Library/Application Support/LocalFlow/localflow.log`.
+- `Fn` does nothing: enable LocalFlow in `System Settings > Privacy & Security > Input Monitoring`, then open `LF > Open LocalFlow > Diagnostics` and click `Retry Hotkeys`, or restart LocalFlow.
+- After pressing `Fn`, open `LF > Open LocalFlow > Diagnostics` and check `Last hotkey`. `Fn via HID` means LocalFlow caught it through the low-level listener; if it still says `none`, macOS did not deliver the key event to LocalFlow.
+- `Option+Space` does nothing: open `LF > Open LocalFlow > Diagnostics` and check the hotkey status or diagnostic log.
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
 - If macOS shows LocalFlow as enabled but LocalFlow still reports missing permission, remove the old LocalFlow entry from that permission pane, run `./Scripts/install_app.sh`, and add `/Applications/LocalFlow.app` again.

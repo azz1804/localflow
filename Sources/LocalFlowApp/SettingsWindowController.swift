@@ -1,6 +1,20 @@
 import AppKit
 import LocalFlowCore
 
+struct LocalFlowDiagnosticInfo: Equatable {
+    var hotkeyStatus: String
+    var lastHotkey: String
+    var accessibilityStatus: String
+    var inputMonitoringStatus: String
+    var fnGlobeAction: String
+    var envPath: String
+    var dictionaryPath: String
+    var historyPath: String
+    var localDataPath: String
+    var logPath: String
+    var appPath: String
+}
+
 @MainActor
 final class SettingsWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTabViewDelegate {
     var onSaveSettings: ((AppConfiguration) -> Result<Void, Error>)?
@@ -10,6 +24,8 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     var onRequestAccessibility: (() -> Void)?
     var onRequestInputMonitoring: (() -> Void)?
     var onOpenSupportFolder: (() -> Void)?
+    var onOpenDiagnosticLog: (() -> Void)?
+    var onRetryHotkeys: (() -> Void)?
 
     private var configuration = AppConfiguration()
     private var dictionary = PersonalDictionary.empty
@@ -33,6 +49,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private let inputMonitoringStatusLabel = NSTextField(labelWithString: "")
     private let envPathLabel = NSTextField(labelWithString: "")
     private let dictionaryPathLabel = NSTextField(labelWithString: "")
+    private let hotkeyStatusLabel = NSTextField(labelWithString: "")
+    private let lastHotkeyLabel = NSTextField(labelWithString: "")
+    private let fnGlobeActionLabel = NSTextField(labelWithString: "")
+    private let historyPathLabel = NSTextField(labelWithString: "")
+    private let localDataPathLabel = NSTextField(labelWithString: "")
+    private let logPathLabel = NSTextField(labelWithString: "")
+    private let appPathLabel = NSTextField(labelWithString: "")
 
     private let historyTableView = NSTableView()
     private let historyDetailView = NSTextView()
@@ -69,7 +92,8 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         envSource: URL?,
         dictionarySource: URL?,
         historyURL: URL,
-        appSupportURL: URL
+        appSupportURL: URL,
+        diagnosticInfo: LocalFlowDiagnosticInfo
     ) {
         self.configuration = configuration
         self.dictionary = dictionary
@@ -87,10 +111,17 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         restoreClipboardCheckbox.state = configuration.restoreClipboardAfterPaste ? .on : .off
         pasteDelayField.stringValue = String(configuration.pasteRestoreDelayMilliseconds)
 
-        accessibilityStatusLabel.stringValue = PermissionManager.isAccessibilityTrusted(prompt: false) ? "Granted" : "Missing"
-        inputMonitoringStatusLabel.stringValue = PermissionManager.isInputMonitoringTrusted() ? "Granted" : "Missing"
-        envPathLabel.stringValue = envSource?.path ?? appSupportURL.appendingPathComponent(".env").path
-        dictionaryPathLabel.stringValue = dictionarySource?.path ?? appSupportURL.appendingPathComponent("dictionary.json").path
+        accessibilityStatusLabel.stringValue = diagnosticInfo.accessibilityStatus
+        inputMonitoringStatusLabel.stringValue = diagnosticInfo.inputMonitoringStatus
+        envPathLabel.stringValue = diagnosticInfo.envPath
+        dictionaryPathLabel.stringValue = diagnosticInfo.dictionaryPath
+        hotkeyStatusLabel.stringValue = diagnosticInfo.hotkeyStatus
+        lastHotkeyLabel.stringValue = diagnosticInfo.lastHotkey
+        fnGlobeActionLabel.stringValue = diagnosticInfo.fnGlobeAction
+        historyPathLabel.stringValue = diagnosticInfo.historyPath
+        localDataPathLabel.stringValue = diagnosticInfo.localDataPath
+        logPathLabel.stringValue = diagnosticInfo.logPath
+        appPathLabel.stringValue = diagnosticInfo.appPath
 
         termsTextView.string = dictionary.terms.joined(separator: "\n")
         replacementsTextView.string = dictionary.replacements
@@ -198,9 +229,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
         tabView.translatesAutoresizingMaskIntoConstraints = false
         tabView.delegate = self
-        tabView.addTabViewItem(tab(identifier: Self.settingsTabIdentifier, label: "Settings", view: buildSettingsTab()))
         tabView.addTabViewItem(tab(identifier: Self.historyTabIdentifier, label: "History", view: buildHistoryTab()))
         tabView.addTabViewItem(tab(identifier: Self.dictionaryTabIdentifier, label: "Dictionary", view: buildDictionaryTab()))
+        tabView.addTabViewItem(tab(identifier: Self.settingsTabIdentifier, label: "Settings", view: buildSettingsTab()))
+        tabView.addTabViewItem(tab(identifier: Self.diagnosticsTabIdentifier, label: "Diagnostics", view: buildDiagnosticsTab()))
         tabView.selectTabViewItem(withIdentifier: Self.historyTabIdentifier)
 
         statusLabel.font = .systemFont(ofSize: 12)
@@ -247,21 +279,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         stack.addArrangedSubview(row("Polish model", polishModelField))
         stack.addArrangedSubview(row("History retention", historyRetentionField, suffix: "days"))
 
-        stack.addArrangedSubview(separator())
-        stack.addArrangedSubview(sectionTitle("Permissions and files"))
-        stack.addArrangedSubview(row("Accessibility", accessibilityStatusLabel))
-        stack.addArrangedSubview(row("Input Monitoring", inputMonitoringStatusLabel))
-        stack.addArrangedSubview(pathRow("Config", envPathLabel))
-        stack.addArrangedSubview(pathRow("Dictionary", dictionaryPathLabel))
-
         let buttons = NSStackView()
         buttons.orientation = .horizontal
         buttons.spacing = 10
         buttons.alignment = .centerY
         buttons.addArrangedSubview(button("Save Settings", action: #selector(saveSettings)))
-        buttons.addArrangedSubview(button("Request Accessibility", action: #selector(requestAccessibility)))
-        buttons.addArrangedSubview(button("Request Input Monitoring", action: #selector(requestInputMonitoring)))
-        buttons.addArrangedSubview(button("Open Local Data Folder", action: #selector(openSupportFolder)))
         buttons.addArrangedSubview(NSView())
         stack.addArrangedSubview(buttons)
 
@@ -368,6 +390,68 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         ])
 
         return container
+    }
+
+    private func buildDiagnosticsTab() -> NSView {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 760))
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 18, bottom: 16, right: 18)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        stack.addArrangedSubview(sectionTitle("Status"))
+        stack.addArrangedSubview(row("Hotkeys", hotkeyStatusLabel))
+        stack.addArrangedSubview(row("Last hotkey", lastHotkeyLabel))
+        stack.addArrangedSubview(row("Fn/Globe action", fnGlobeActionLabel))
+
+        let hotkeyButtons = NSStackView()
+        hotkeyButtons.orientation = .horizontal
+        hotkeyButtons.spacing = 10
+        hotkeyButtons.addArrangedSubview(button("Retry Hotkeys", action: #selector(retryHotkeys)))
+        hotkeyButtons.addArrangedSubview(button("Reload Config and Dictionary", action: #selector(refreshWindowData)))
+        hotkeyButtons.addArrangedSubview(NSView())
+        stack.addArrangedSubview(hotkeyButtons)
+
+        stack.addArrangedSubview(separator())
+        stack.addArrangedSubview(sectionTitle("Permissions"))
+        stack.addArrangedSubview(row("Accessibility", accessibilityStatusLabel))
+        stack.addArrangedSubview(row("Input Monitoring", inputMonitoringStatusLabel))
+
+        let permissionButtons = NSStackView()
+        permissionButtons.orientation = .horizontal
+        permissionButtons.spacing = 10
+        permissionButtons.addArrangedSubview(button("Request Accessibility", action: #selector(requestAccessibility)))
+        permissionButtons.addArrangedSubview(button("Request Input Monitoring", action: #selector(requestInputMonitoring)))
+        permissionButtons.addArrangedSubview(NSView())
+        stack.addArrangedSubview(permissionButtons)
+
+        stack.addArrangedSubview(separator())
+        stack.addArrangedSubview(sectionTitle("Files"))
+        stack.addArrangedSubview(pathRow("Config", envPathLabel))
+        stack.addArrangedSubview(pathRow("Dictionary", dictionaryPathLabel))
+        stack.addArrangedSubview(pathRow("History", historyPathLabel))
+        stack.addArrangedSubview(pathRow("Local data", localDataPathLabel))
+        stack.addArrangedSubview(pathRow("Log", logPathLabel))
+        stack.addArrangedSubview(pathRow("App", appPathLabel))
+
+        let fileButtons = NSStackView()
+        fileButtons.orientation = .horizontal
+        fileButtons.spacing = 10
+        fileButtons.addArrangedSubview(button("Open Local Data Folder", action: #selector(openSupportFolder)))
+        fileButtons.addArrangedSubview(button("Open Diagnostic Log", action: #selector(openDiagnosticLog)))
+        fileButtons.addArrangedSubview(NSView())
+        stack.addArrangedSubview(fileButtons)
+
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor)
+        ])
+
+        return wrapInScrollView(view)
     }
 
     private func configureHistoryTable() {
@@ -513,6 +597,15 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func openSupportFolder() {
         onOpenSupportFolder?()
+    }
+
+    @objc private func openDiagnosticLog() {
+        onOpenDiagnosticLog?()
+    }
+
+    @objc private func retryHotkeys() {
+        onRetryHotkeys?()
+        setStatus("Hotkeys retried.")
     }
 
     private func parsedDictionaryFromEditors() throws -> PersonalDictionary {
@@ -726,6 +819,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private static let settingsTabIdentifier = "settings"
     private static let historyTabIdentifier = "history"
     private static let dictionaryTabIdentifier = "dictionary"
+    private static let diagnosticsTabIdentifier = "diagnostics"
 
     private static let fullDateFormatter: DateFormatter = {
         let formatter = DateFormatter()

@@ -25,9 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let lastHotkeyMenuItem = NSMenuItem(title: "Last hotkey: none", action: nil, keyEquivalent: "")
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
     private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
-    private let diagnosticLogMenuItem = NSMenuItem(title: "Open Diagnostic Log", action: #selector(openDiagnosticLog), keyEquivalent: "")
-    private let fnSystemActionMenuItem = NSMenuItem(title: "Fn/Globe macOS action: Unknown", action: nil, keyEquivalent: "")
-    private let disableFnSystemActionMenuItem = NSMenuItem(title: "Set Fn/Globe to Do Nothing", action: #selector(setFnGlobeToDoNothing), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -162,35 +159,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let reloadItem = NSMenuItem(title: "Reload .env and Dictionary", action: #selector(reloadConfiguration), keyEquivalent: "")
-        reloadItem.target = self
-        menu.addItem(reloadItem)
-
-        let openSupportItem = NSMenuItem(title: "Open Local Data Folder", action: #selector(openSupportFolder), keyEquivalent: "")
-        openSupportItem.target = self
-        menu.addItem(openSupportItem)
-
-        hotkeyStatusMenuItem.target = self
-        menu.addItem(hotkeyStatusMenuItem)
-
-        lastHotkeyMenuItem.isEnabled = false
-        menu.addItem(lastHotkeyMenuItem)
-
-        accessibilityMenuItem.target = self
-        menu.addItem(accessibilityMenuItem)
-
-        inputMonitoringMenuItem.target = self
-        menu.addItem(inputMonitoringMenuItem)
-
-        fnSystemActionMenuItem.isEnabled = false
-        menu.addItem(fnSystemActionMenuItem)
-
-        disableFnSystemActionMenuItem.target = self
-        menu.addItem(disableFnSystemActionMenuItem)
-
-        diagnosticLogMenuItem.target = self
-        menu.addItem(diagnosticLogMenuItem)
-
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit LocalFlow", action: #selector(quit), keyEquivalent: "q")
@@ -259,9 +227,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshFnSystemActionMenuState() {
-        let usage = Self.fnUsageType
-        fnSystemActionMenuItem.title = "Fn/Globe macOS action: \(Self.description(forFnUsageType: usage))"
-        disableFnSystemActionMenuItem.isEnabled = usage != 0
     }
 
     private func showFatalError(_ error: Error) {
@@ -291,6 +256,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindow() {
+        presentMainWindow(selectHistory: true)
+    }
+
+    private func presentMainWindow(selectHistory: Bool) {
         let settingsWindowController = self.settingsWindowController ?? SettingsWindowController()
         configureSettingsWindowCallbacks(settingsWindowController)
         settingsWindowController.update(
@@ -300,9 +269,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             envSource: envSourceURL,
             dictionarySource: dictionarySourceURL,
             historyURL: historyURL,
-            appSupportURL: appSupportURL
+            appSupportURL: appSupportURL,
+            diagnosticInfo: makeDiagnosticInfo()
         )
-        settingsWindowController.selectHistoryTab()
+        if selectHistory {
+            settingsWindowController.selectHistoryTab()
+        }
         settingsWindowController.showWindow(nil)
         settingsWindowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -332,23 +304,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             NSWorkspace.shared.open(appSupportURL)
         }
-    }
-
-    @objc private func setFnGlobeToDoNothing() {
-        guard let defaults = UserDefaults(suiteName: "com.apple.HIToolbox") else {
-            return
-        }
-
-        defaults.set(0, forKey: "AppleFnUsageType")
-        defaults.synchronize()
-        LocalFlowLogger.log("Set AppleFnUsageType=0")
-        refreshFnSystemActionMenuState()
-
-        let alert = NSAlert()
-        alert.messageText = "Fn/Globe set to Do Nothing"
-        alert.informativeText = "Restart your Mac for this macOS keyboard setting to fully apply. LocalFlow can still use Option+Space meanwhile."
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
     }
 
     @objc private func requestAccessibilityPermission() {
@@ -498,7 +453,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         controller.onRefresh = { [weak self] in
-            self?.reloadConfiguration()
+            guard let self else {
+                return
+            }
+
+            do {
+                try self.loadRuntimeConfiguration()
+                self.dictationController?.updateConfiguration(self.configuration, dictionary: self.dictionary)
+                self.restartHotkeys()
+                self.polishMenuItem.state = self.configuration.enablePolish ? .on : .off
+                self.presentMainWindow(selectHistory: false)
+            } catch {
+                self.floatingBarController?.update(status: .error(error.localizedDescription), level: 0)
+            }
         }
 
         controller.onRequestAccessibility = { [weak self] in
@@ -512,6 +479,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onOpenSupportFolder = { [weak self] in
             self?.openSupportFolder()
         }
+
+        controller.onOpenDiagnosticLog = { [weak self] in
+            self?.openDiagnosticLog()
+        }
+
+        controller.onRetryHotkeys = { [weak self] in
+            self?.retryHotkeys()
+            self?.presentMainWindow(selectHistory: false)
+        }
+    }
+
+    private func makeDiagnosticInfo() -> LocalFlowDiagnosticInfo {
+        refreshPermissionMenuState()
+
+        let logURL = appSupportURL.appendingPathComponent("localflow.log")
+        let envURL = envSourceURL ?? appSupportURL.appendingPathComponent(".env")
+        let dictionaryURL = dictionarySourceURL ?? appSupportURL.appendingPathComponent("dictionary.json")
+
+        return LocalFlowDiagnosticInfo(
+            hotkeyStatus: hotkeyStatusMenuItem.title,
+            lastHotkey: lastHotkeyMenuItem.title.replacingOccurrences(of: "Last hotkey: ", with: ""),
+            accessibilityStatus: PermissionManager.isAccessibilityTrusted(prompt: false) ? "Granted" : "Missing",
+            inputMonitoringStatus: PermissionManager.isInputMonitoringTrusted() ? "Granted" : "Missing",
+            fnGlobeAction: Self.description(forFnUsageType: Self.fnUsageType),
+            envPath: envURL.path,
+            dictionaryPath: dictionaryURL.path,
+            historyPath: historyURL.path,
+            localDataPath: appSupportURL.path,
+            logPath: logURL.path,
+            appPath: Bundle.main.bundlePath
+        )
     }
 
     private func loadHistoryRecords() -> [DictationRecord] {

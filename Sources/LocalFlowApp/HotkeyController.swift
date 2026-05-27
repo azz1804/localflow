@@ -130,6 +130,18 @@ struct HotkeySpec: Equatable {
         return result
     }
 
+    var isCarbonRegisterable: Bool {
+        guard carbonKeyCode != nil else {
+            return false
+        }
+
+        guard !modifiers.contains(.maskSecondaryFn) else {
+            return false
+        }
+
+        return carbonModifiers != 0
+    }
+
     private func normalizedModifiers(_ flags: CGEventFlags) -> CGEventFlags {
         flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn])
     }
@@ -476,7 +488,7 @@ final class HotkeyController {
     }
 
     private func registerCarbonHotkey(spec: HotkeySpec?, id: UInt32) {
-        guard let spec, let keyCode = spec.carbonKeyCode else {
+        guard let spec, spec.isCarbonRegisterable, let keyCode = spec.carbonKeyCode else {
             return
         }
 
@@ -746,6 +758,10 @@ final class HotkeyController {
         }
 
         guard activeHoldSource == nil else {
+            return false
+        }
+
+        guard fnIsDown || hidFnIsDown || pendingHoldTask != nil else {
             return false
         }
 
