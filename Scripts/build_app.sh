@@ -13,9 +13,9 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 cd "$ROOT_DIR"
 
 if [[ "$CONFIGURATION" == "debug" ]]; then
-  swift build
+  swift build >&2
 else
-  swift build -c release
+  swift build -c release >&2
 fi
 
 rm -rf "$APP_DIR"
