@@ -20,11 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
+    private let hotkeyStatusMenuItem = NSMenuItem(title: "Hotkeys: Starting", action: #selector(retryHotkeys), keyEquivalent: "")
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             try loadRuntimeConfiguration()
+            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
             setupMenuBar()
             setupControllers()
             refreshAccessibilityMenuState()
@@ -95,20 +97,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         hotkeyController.onHoldStart = { [weak self] in
+            LocalFlowLogger.log("Hotkey hold start")
             self?.dictationController?.beginHoldRecording()
         }
         hotkeyController.onHoldEnd = { [weak self] in
+            LocalFlowLogger.log("Hotkey hold end")
             self?.dictationController?.endHoldRecording()
         }
         hotkeyController.onToggle = { [weak self] in
+            LocalFlowLogger.log("Hotkey toggle")
             self?.dictationController?.toggleRecording()
         }
-        _ = hotkeyController.start()
+        let started = hotkeyController.start()
+        LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
 
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
         self.hotkeyController = hotkeyController
         refreshAccessibilityMenuState()
+
+        if !started {
+            scheduleHotkeyRetryAfterAccessibilityPrompt()
+        }
     }
 
     private func setupMenuBar() {
@@ -145,6 +155,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSupportItem.target = self
         menu.addItem(openSupportItem)
 
+        hotkeyStatusMenuItem.target = self
+        menu.addItem(hotkeyStatusMenuItem)
+
         accessibilityMenuItem.target = self
         menu.addItem(accessibilityMenuItem)
 
@@ -171,6 +184,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let trusted = PermissionManager.isAccessibilityTrusted(prompt: false)
         accessibilityMenuItem.title = trusted ? "Accessibility Permission Granted" : "Enable Accessibility Permission"
         accessibilityMenuItem.isEnabled = !trusted
+        updateHotkeyStatusMenu()
+    }
+
+    private func updateHotkeyStatusMenu() {
+        if hotkeyController?.isRunning == true {
+            hotkeyStatusMenuItem.title = "Hotkeys: Active"
+            hotkeyStatusMenuItem.isEnabled = false
+        } else {
+            hotkeyStatusMenuItem.title = "Hotkeys: Inactive - Retry"
+            hotkeyStatusMenuItem.isEnabled = true
+        }
     }
 
     private func showFatalError(_ error: Error) {
@@ -245,6 +269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleHotkeyRetryAfterAccessibilityPrompt()
     }
 
+    @objc private func retryHotkeys() {
+        restartHotkeys()
+    }
+
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
     }
@@ -258,19 +286,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleHotkey: configuration.toggleHotkey
         )
         hotkeyController.onHoldStart = { [weak dictationController] in
+            LocalFlowLogger.log("Hotkey hold start")
             dictationController?.beginHoldRecording()
         }
         hotkeyController.onHoldEnd = { [weak dictationController] in
+            LocalFlowLogger.log("Hotkey hold end")
             dictationController?.endHoldRecording()
         }
         hotkeyController.onToggle = { [weak dictationController] in
+            LocalFlowLogger.log("Hotkey toggle")
             dictationController?.toggleRecording()
         }
         let started = hotkeyController.start()
         self.hotkeyController = hotkeyController
+        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false))")
         refreshAccessibilityMenuState()
 
-        if !started, !PermissionManager.isAccessibilityTrusted(prompt: false) {
+        if !started {
             scheduleHotkeyRetryAfterAccessibilityPrompt()
         }
     }

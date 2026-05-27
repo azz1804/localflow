@@ -101,6 +101,7 @@ final class HotkeyController {
     private var fnIsDown = false
     private var holdFallbackIsDown = false
     private(set) var isRunning = false
+    private(set) var activeTapDescription = "none"
 
     init(holdHotkey: String, fallbackHoldHotkey: String, toggleHotkey: String) {
         self.holdSpec = HotkeySpec.parse(holdHotkey)
@@ -129,17 +130,25 @@ final class HotkeyController {
         }
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: callback,
-            userInfo: refcon
-        )
+        for tapLocation in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
+            eventTap = CGEvent.tapCreate(
+                tap: tapLocation,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: CGEventMask(eventMask),
+                callback: callback,
+                userInfo: refcon
+            )
+
+            if eventTap != nil {
+                activeTapDescription = Self.description(for: tapLocation)
+                break
+            }
+        }
 
         guard let eventTap else {
             isRunning = false
+            activeTapDescription = "none"
             return false
         }
 
@@ -165,6 +174,7 @@ final class HotkeyController {
         eventTap = nil
         runLoopSource = nil
         isRunning = false
+        activeTapDescription = "none"
         fnIsDown = false
         holdFallbackIsDown = false
     }
@@ -251,5 +261,18 @@ final class HotkeyController {
         }
 
         return Unmanaged.passUnretained(event)
+    }
+
+    private static func description(for tapLocation: CGEventTapLocation) -> String {
+        switch tapLocation {
+        case .cghidEventTap:
+            return "hid"
+        case .cgSessionEventTap:
+            return "session"
+        case .cgAnnotatedSessionEventTap:
+            return "annotated-session"
+        @unknown default:
+            return "unknown"
+        }
     }
 }

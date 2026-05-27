@@ -42,6 +42,18 @@ System Settings > Privacy & Security > Accessibility
 
 Then enable LocalFlow. If it appears twice after rebuilds, remove the old entry and add the latest app bundle again.
 
+To install or update the app in `/Applications`, use the install script. It quits any running LocalFlow process before replacing the bundle:
+
+```bash
+./Scripts/install_app.sh
+```
+
+For a user-local install:
+
+```bash
+./Scripts/install_app.sh ~/Applications
+```
+
 ## Usage
 
 - Hold `Fn` to record, then release to transcribe and paste.
@@ -61,6 +73,8 @@ Menu bar items:
 - `Open LocalFlow`: opens the graphical interface.
 - `Reload .env and Dictionary`: reloads config, dictionary and hotkeys without rebuilding.
 - `Open Support Folder`: opens the runtime folder that contains `dictionary.json` and `history.jsonl`.
+- `Hotkeys: Active`: confirms the global keyboard hook is running.
+- `Hotkeys: Inactive - Retry`: retries installing the global keyboard hook.
 - `Request Accessibility Permission`: triggers the macOS permission prompt again.
 
 ## Graphical interface
@@ -135,3 +149,5 @@ Live transcription was not exercised here because no real `.env` with `OPENAI_AP
 - `Fn` does nothing: use `Option+Space` or change `HOLD_HOTKEY` / `FALLBACK_HOLD_HOTKEY` in `.env`.
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
+- `Fn` does nothing: click `LF > Hotkeys: Inactive - Retry` if visible. If it stays inactive, remove LocalFlow from `System Settings > Privacy & Security > Accessibility`, run `./Scripts/install_app.sh`, then enable the new LocalFlow entry.
+- Diagnostics are written to `~/Library/Application Support/LocalFlow/localflow.log`.
