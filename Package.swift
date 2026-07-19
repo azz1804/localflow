@@ -20,6 +20,10 @@ let package = Package(
         .testTarget(
             name: "LocalFlowCoreTests",
             dependencies: ["LocalFlowCore"]
+        ),
+        .testTarget(
+            name: "LocalFlowAppTests",
+            dependencies: ["LocalFlowApp"]
         )
     ]
 )

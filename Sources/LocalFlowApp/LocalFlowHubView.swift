@@ -1,0 +1,418 @@
+import SwiftUI
+
+struct LocalFlowHubView: View {
+    @ObservedObject var model: LocalFlowHubModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            HStack(spacing: 0) {
+                HubSidebar(model: model)
+                    .frame(width: 218)
+
+                ZStack {
+                    HubPalette.canvas
+                        .ignoresSafeArea()
+
+                    selectedPage
+                        .id(model.selectedSection)
+                        .transition(
+                            reduceMotion
+                                ? .identity
+                                : .asymmetric(
+                                    insertion: .opacity.combined(with: .move(edge: .trailing)),
+                                    removal: .opacity
+                                )
+                        )
+                }
+            }
+
+            if !model.statusMessage.isEmpty {
+                HubToast(
+                    message: model.statusMessage,
+                    isError: model.statusIsError
+                )
+                .padding(24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .frame(minWidth: 940, minHeight: 640)
+        .background(HubPalette.canvas)
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86),
+            value: model.selectedSection
+        )
+        .animation(.easeOut(duration: 0.2), value: model.statusMessage)
+    }
+
+    @ViewBuilder
+    private var selectedPage: some View {
+        switch model.selectedSection {
+        case .home:
+            LocalFlowHomeView(model: model)
+        case .history:
+            LocalFlowHistoryView(model: model)
+        case .insights:
+            LocalFlowInsightsView(model: model)
+        case .dictionary:
+            LocalFlowDictionaryView(model: model)
+        case .settings:
+            LocalFlowSettingsView(model: model)
+        case .diagnostics:
+            LocalFlowDiagnosticsView(model: model)
+        }
+    }
+}
+
+private struct HubSidebar: View {
+    @ObservedObject var model: LocalFlowHubModel
+
+    private let primarySections: [LocalFlowHubSection] = [
+        .home, .history, .insights, .dictionary
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            brand
+                .padding(.top, 34)
+                .padding(.horizontal, 20)
+
+            Text("YOUR VOICE WORKSPACE")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .tracking(1.2)
+                .foregroundStyle(.white.opacity(0.34))
+                .padding(.top, 26)
+                .padding(.bottom, 10)
+                .padding(.horizontal, 22)
+
+            VStack(spacing: 5) {
+                ForEach(primarySections) { section in
+                    HubSidebarButton(
+                        section: section,
+                        isSelected: model.selectedSection == section
+                    ) {
+                        model.selectedSection = section
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+
+            Spacer(minLength: 24)
+
+            shortcutCard
+                .padding(.horizontal, 14)
+                .padding(.bottom, 18)
+
+            VStack(spacing: 5) {
+                HubSidebarButton(
+                    section: .settings,
+                    isSelected: model.selectedSection == .settings
+                ) {
+                    model.selectedSection = .settings
+                }
+
+                HubSidebarButton(
+                    section: .diagnostics,
+                    isSelected: model.selectedSection == .diagnostics
+                ) {
+                    model.selectedSection = .diagnostics
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 20)
+        }
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.075, green: 0.078, blue: 0.11),
+                    Color(red: 0.045, green: 0.047, blue: 0.068)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(.white.opacity(0.07))
+                .frame(width: 1)
+        }
+    }
+
+    private var brand: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [HubPalette.purple, HubPalette.blue],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: HubPalette.purple.opacity(0.42), radius: 14, y: 5)
+
+                Image(systemName: "waveform")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("LocalFlow")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Private dictation")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+        }
+    }
+
+    private var shortcutCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "mic.fill")
+                    .foregroundStyle(HubPalette.purple)
+                Text("Ready to dictate")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Spacer()
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: .green.opacity(0.7), radius: 5)
+            }
+
+            HStack(spacing: 6) {
+                HubKeycap("fn")
+                Text("hold to talk")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(0.055))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+private struct HubSidebarButton: View {
+    let section: LocalFlowHubSection
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 22)
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.52))
+
+                Text(section.title)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.62))
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 40)
+            .background {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? AnyShapeStyle(
+                                LinearGradient(
+                                    colors: [
+                                        HubPalette.purple.opacity(0.8),
+                                        HubPalette.blue.opacity(0.66)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            : AnyShapeStyle(Color.white.opacity(isHovering ? 0.055 : 0))
+                    )
+            }
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule()
+                        .fill(.white.opacity(0.92))
+                        .frame(width: 3, height: 18)
+                        .offset(x: -3)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+}
+
+struct HubPageHeader<Trailing: View>: View {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    @ViewBuilder let trailing: () -> Trailing
+
+    init(
+        eyebrow: String,
+        title: String,
+        subtitle: String,
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.eyebrow = eyebrow
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(eyebrow.uppercased())
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.3)
+                    .foregroundStyle(HubPalette.purple)
+
+                Text(title)
+                    .font(.system(size: 29, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Text(subtitle)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+            trailing()
+        }
+    }
+}
+
+extension HubPageHeader where Trailing == EmptyView {
+    init(eyebrow: String, title: String, subtitle: String) {
+        self.init(eyebrow: eyebrow, title: title, subtitle: subtitle) {
+            EmptyView()
+        }
+    }
+}
+
+struct HubCard<Content: View>: View {
+    var padding: CGFloat = 20
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(padding)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(HubPalette.card)
+                    .shadow(color: .black.opacity(0.055), radius: 18, y: 8)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(HubPalette.border, lineWidth: 1)
+            }
+    }
+}
+
+struct HubKeycap: View {
+    let label: String
+
+    init(_ label: String) {
+        self.label = label
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 8)
+            .frame(height: 23)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.white.opacity(0.1))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(.white.opacity(0.12), lineWidth: 1)
+            }
+    }
+}
+
+struct HubPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(height: 36)
+            .background(
+                LinearGradient(
+                    colors: [HubPalette.purple, HubPalette.blue],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .opacity(configuration.isPressed ? 0.78 : 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: HubPalette.purple.opacity(configuration.isPressed ? 0.12 : 0.28), radius: 10, y: 4)
+    }
+}
+
+struct HubSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .background(HubPalette.softFill.opacity(configuration.isPressed ? 0.65 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(HubPalette.border, lineWidth: 1)
+            }
+    }
+}
+
+private struct HubToast: View {
+    let message: String
+    let isError: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(isError ? .orange : .green)
+            Text(message)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(.white.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 20, y: 8)
+    }
+}
+
+enum HubPalette {
+    static let purple = Color(red: 0.68, green: 0.25, blue: 0.96)
+    static let blue = Color(red: 0.25, green: 0.42, blue: 0.98)
+    static let cyan = Color(red: 0.15, green: 0.74, blue: 0.95)
+    static let canvas = Color(nsColor: .windowBackgroundColor)
+    static let card = Color(nsColor: .controlBackgroundColor)
+    static let softFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.5)
+    static let border = Color.primary.opacity(0.075)
+}

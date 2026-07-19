@@ -188,12 +188,20 @@ final class DictationController {
     }
 
     private func processRecording(_ result: RecordingResult) async {
+        isProcessing = true
+        defer {
+            isProcessing = false
+            recordingTargetApplication = nil
+            recordingStartedAt = nil
+            recordingMode = .hold
+            removeTemporaryFile(result.fileURL)
+        }
+
         guard let openAIClient else {
             setStatus(.error("Missing OPENAI_API_KEY in .env"), level: 0)
             return
         }
 
-        isProcessing = true
         setStatus(.processing, level: 0)
         LocalFlowLogger.log("Processing started duration=\(String(format: "%.2f", result.durationSeconds))")
 
@@ -248,19 +256,13 @@ final class DictationController {
             LocalFlowLogger.log("Processing failed error=\(error.localizedDescription)")
             setStatus(.error(error.localizedDescription), level: 0)
         }
-
-        isProcessing = false
-        recordingTargetApplication = nil
-        recordingStartedAt = nil
-        recordingMode = .hold
-        removeTemporaryFile(result.fileURL)
     }
 
     private func startRecordingStatusLoop() {
         recordingTask?.cancel()
         recordingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 80_000_000)
+                try? await Task.sleep(nanoseconds: 40_000_000)
                 await MainActor.run {
                     self?.refreshRecordingStatus()
                 }

@@ -3,11 +3,17 @@ import Foundation
 
 enum TextInsertionError: LocalizedError {
     case accessibilityPermissionMissing
+    case clipboardWriteFailed
+    case pasteEventCreationFailed
 
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionMissing:
             return "Accessibility permission is required to paste into the active app."
+        case .clipboardWriteFailed:
+            return "LocalFlow could not write the dictated text to the clipboard."
+        case .pasteEventCreationFailed:
+            return "LocalFlow could not create the keyboard event used to paste text."
         }
     }
 }
@@ -32,9 +38,12 @@ final class TextInsertionService {
         let snapshot = restoreClipboard ? capture(pasteboard: pasteboard) : nil
 
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        guard pasteboard.setString(text, forType: .string) else {
+            throw TextInsertionError.clipboardWriteFailed
+        }
+        let insertedTextChangeCount = pasteboard.changeCount
 
-        sendPasteKeystroke()
+        try sendPasteKeystroke()
 
         guard restoreClipboard, let snapshot else {
             return
@@ -42,6 +51,13 @@ final class TextInsertionService {
 
         let delay = max(0, restoreDelayMilliseconds)
         try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+
+        // Do not overwrite clipboard content copied by the user or another app
+        // while the temporary dictation text was available.
+        guard pasteboard.changeCount == insertedTextChangeCount else {
+            return
+        }
+
         restore(snapshot, to: pasteboard)
     }
 
@@ -75,17 +91,20 @@ final class TextInsertionService {
         }
     }
 
-    private func sendPasteKeystroke() {
-        let source = CGEventSource(stateID: .hidSystemState)
+    private func sendPasteKeystroke() throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw TextInsertionError.pasteEventCreationFailed
+        }
         let keyCode: CGKeyCode = 9 // v
 
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
-        keyDown?.flags = .maskCommand
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            throw TextInsertionError.pasteEventCreationFailed
+        }
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
 
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
-        keyUp?.flags = .maskCommand
-
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
     }
 }

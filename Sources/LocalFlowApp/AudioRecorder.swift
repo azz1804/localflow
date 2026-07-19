@@ -57,18 +57,23 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]
 
-        let audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-        audioRecorder.delegate = self
-        audioRecorder.isMeteringEnabled = true
-        audioRecorder.prepareToRecord()
+        do {
+            let audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+            audioRecorder.delegate = self
+            audioRecorder.isMeteringEnabled = true
+            audioRecorder.prepareToRecord()
 
-        guard audioRecorder.record() else {
-            throw AudioRecorderError.couldNotStart
+            guard audioRecorder.record() else {
+                throw AudioRecorderError.couldNotStart
+            }
+
+            recorder = audioRecorder
+            recordingURL = url
+            startedAt = Date()
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
         }
-
-        recorder = audioRecorder
-        recordingURL = url
-        startedAt = Date()
     }
 
     func stop() throws -> RecordingResult {
@@ -93,8 +98,14 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         }
 
         recorder.updateMeters()
-        let power = recorder.averagePower(forChannel: 0)
-        let normalized = max(0, min(1, (power + 55) / 55))
-        return normalized
+        let average = Self.normalizedPower(recorder.averagePower(forChannel: 0))
+        let peak = Self.normalizedPower(recorder.peakPower(forChannel: 0))
+        return min(1, average * 0.72 + peak * 0.28)
+    }
+
+    private static func normalizedPower(_ decibels: Float) -> Float {
+        let noiseFloor: Float = -55
+        let linear = max(0, min(1, (decibels - noiseFloor) / -noiseFloor))
+        return pow(linear, 0.72)
     }
 }

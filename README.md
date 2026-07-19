@@ -5,10 +5,11 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 ## V1 features
 
 - Native macOS menu bar app.
-- Floating recording/processing bar.
-- LocalFlow interface with settings, history and dictionary tabs.
+- Animated floating recording/processing card driven by the live microphone level.
+- Product-style LocalFlow Hub with home, history, word insights, dictionary, settings and diagnostics.
 - Hold-to-talk hotkey: `Fn` first, with `Option+Space` fallback.
 - Toggle hotkey: `Fn+Space`.
+- `Escape` finishes an active toggle recording and starts transcription.
 - Local temporary audio recording, deleted after transcription.
 - OpenAI transcription with French defaults and mixed English vocabulary support.
 - Optional OpenAI polish pass, disabled by default.
@@ -104,6 +105,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
+- Press `Escape` to stop an active toggle recording and transcribe/paste it.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
@@ -123,10 +125,12 @@ Menu bar items:
 
 Open it from `LF > Open LocalFlow`.
 
-- `Settings`: edit the OpenAI key, models, language, hotkeys, polish, clipboard restore and history retention.
-- `History`: browse recent dictated messages, inspect raw/final text, copy any item with its row-level `Copy` button, or clear local history.
+- `Home`: see LocalFlow status, shortcut guidance, key metrics, weekly activity and recent transcripts.
+- `History`: search and browse transcripts grouped by day, inspect raw/final text, copy an item or clear local history.
+- `Words & Stats`: track total words, dictation speed, voice time, estimated time saved, streaks and top applications.
 - `Dictionary`: edit vocabulary terms and replacement rules. Terms are one per line. Replacements use `spoken phrase = final text`.
-- `Diagnostics`: inspect hotkey status, permissions, file paths, logs and reload config/dictionary without rebuilding.
+- `Settings`: edit the OpenAI key, models, language, hotkeys, polish, clipboard restore and history retention.
+- `Diagnostics`: inspect hotkey status, permissions, file paths and logs, or restart the hotkey engine.
 
 Settings are saved to:
 
@@ -181,7 +185,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 10 unit tests passing.
+- `swift test`: 19 unit tests passing.
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.

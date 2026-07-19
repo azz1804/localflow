@@ -237,7 +237,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showFatalError(_ error: Error) {
-        floatingBarController?.update(status: .error(error.localizedDescription), level: 0)
+        LocalFlowLogger.log("Fatal startup error=\(error.localizedDescription)")
+
+        if let floatingBarController {
+            floatingBarController.update(status: .error(error.localizedDescription), level: 0)
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "LocalFlow could not start"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "Quit")
+        alert.runModal()
+        NSApp.terminate(nil)
     }
 
     @objc private func toggleManualRecording() {
@@ -263,10 +276,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindow() {
-        presentMainWindow(selectHistory: true)
+        presentMainWindow(selectHistory: false, selectHome: true)
     }
 
-    private func presentMainWindow(selectHistory: Bool) {
+    private func presentMainWindow(selectHistory: Bool, selectHome: Bool = false) {
         let settingsWindowController = self.settingsWindowController ?? SettingsWindowController()
         configureSettingsWindowCallbacks(settingsWindowController)
         settingsWindowController.update(
@@ -279,7 +292,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appSupportURL: appSupportURL,
             diagnosticInfo: makeDiagnosticInfo()
         )
-        if selectHistory {
+        if selectHome {
+            settingsWindowController.selectHomeTab()
+        } else if selectHistory {
             settingsWindowController.selectHistoryTab()
         }
         settingsWindowController.showWindow(nil)

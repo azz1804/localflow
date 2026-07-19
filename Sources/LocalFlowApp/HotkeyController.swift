@@ -586,6 +586,15 @@ final class HotkeyController {
 
     private func handleKeyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+
+        if Self.shouldStopToggleRecordingWithEscape(
+            keyCode: keyCode,
+            isRepeat: isRepeat,
+            toggleRecordingIsActive: toggleRecordingIsActive
+        ), stopToggleRecordingWithEscape(source: "escape-cg-key") {
+            return nil
+        }
 
         if let holdSpec, holdSpec.matchesFnKeyEvent(event), !isRepeat {
             if !fnIsDown {
@@ -665,6 +674,15 @@ final class HotkeyController {
     private func handleNSEventKeyDown(_ snapshot: HotkeyEventSnapshot) -> Bool {
         guard !snapshot.isRepeat else {
             return false
+        }
+
+        if Self.shouldStopToggleRecordingWithEscape(
+            keyCode: snapshot.keyCode,
+            isRepeat: snapshot.isRepeat,
+            toggleRecordingIsActive: toggleRecordingIsActive
+        ),
+           stopToggleRecordingWithEscape(source: "escape-nsevent-key") {
+            return true
         }
 
         if let holdSpec, holdSpec.matchesFnKeyEvent(snapshot) {
@@ -800,6 +818,25 @@ final class HotkeyController {
         onHoldLocked?()
     }
 
+    private func stopToggleRecordingWithEscape(source: String) -> Bool {
+        guard toggleRecordingIsActive else {
+            return false
+        }
+
+        activeHoldSource = nil
+        cancelPendingHoldStart()
+        triggerToggleIfNeeded(source: source)
+        return true
+    }
+
+    static func shouldStopToggleRecordingWithEscape(
+        keyCode: UInt16,
+        isRepeat: Bool,
+        toggleRecordingIsActive: Bool
+    ) -> Bool {
+        keyCode == escapeKeyCode && !isRepeat && toggleRecordingIsActive
+    }
+
     private func triggerToggleIfNeeded(source: String) {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastToggleTime > 0.25 else {
@@ -900,6 +937,10 @@ final class HotkeyController {
             return "toggle via CG key"
         case "toggle-nsevent-key":
             return "toggle via NSEvent"
+        case "escape-cg-key":
+            return "Escape via CG key"
+        case "escape-nsevent-key":
+            return "Escape via NSEvent"
         default:
             return source
         }
@@ -911,5 +952,6 @@ final class HotkeyController {
     private static let keyboardFnUsage = 0xE8
     private static let appleVendorUsagePage = 0xFF00
     private static let appleVendorFnUsages: Set<Int> = [3, 11, 13, 95]
+    private static let escapeKeyCode: UInt16 = 53
     private static let fnCombinationDelayNanoseconds: UInt64 = 180_000_000
 }

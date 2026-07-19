@@ -16,16 +16,16 @@ enum AppStatus: Equatable {
         switch self {
         case .idle:
             return "Ready"
-        case let .recording(duration, .hold):
-            return String(format: "Recording %.1fs", duration)
-        case let .recording(duration, .toggle):
-            return String(format: "Toggle recording %.1fs", duration)
+        case .recording(_, .hold):
+            return "Listening"
+        case .recording(_, .toggle):
+            return "Hands-free"
         case .processing:
-            return "Processing"
+            return "Refining your words"
         case .done:
-            return "Pasted"
+            return "Pasted successfully"
         case .error:
-            return "Error"
+            return "Something went wrong"
         }
     }
 
