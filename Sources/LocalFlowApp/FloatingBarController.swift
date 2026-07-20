@@ -316,7 +316,7 @@ final class FloatingBarView: NSView {
         configureLayer()
     }
 
-    override var isFlipped: Bool {
+    nonisolated override var isFlipped: Bool {
         true
     }
 

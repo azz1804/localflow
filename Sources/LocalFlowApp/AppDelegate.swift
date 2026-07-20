@@ -56,6 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(
+        _ sender: NSApplication
+    ) -> Bool {
+        false
+    }
+
     private func loadRuntimeConfiguration() throws {
         appSupportURL = try LocalFlowPaths.ensureAppSupportDirectory()
         historyURL = try LocalFlowPaths.historyURL()

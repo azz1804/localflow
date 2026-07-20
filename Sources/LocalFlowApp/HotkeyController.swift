@@ -204,6 +204,33 @@ struct HotkeyEventSnapshot: Sendable {
     }
 }
 
+struct HotkeyPressGate: Equatable {
+    private(set) var isPressed = false
+    private var pressedAt: CFTimeInterval = 0
+
+    mutating func begin(
+        at time: CFTimeInterval,
+        isRepeat: Bool
+    ) -> Bool {
+        guard !isRepeat else {
+            return false
+        }
+
+        if isPressed, time - pressedAt < 1.5 {
+            return false
+        }
+
+        isPressed = true
+        pressedAt = time
+        return true
+    }
+
+    mutating func end() {
+        isPressed = false
+        pressedAt = 0
+    }
+}
+
 @MainActor
 final class HotkeyController {
     var onHoldStart: (() -> Void)?
@@ -229,6 +256,8 @@ final class HotkeyController {
     private var activeHoldSource: String?
     private var pendingHoldTask: Task<Void, Never>?
     private var pendingHoldSource: String?
+    private var pendingFnReleaseTask: Task<Void, Never>?
+    private var togglePressGate = HotkeyPressGate()
     private var toggleRecordingIsActive = false
     private var lastToggleTime: CFTimeInterval = 0
     private(set) var isRunning = false
@@ -349,6 +378,8 @@ final class HotkeyController {
         holdFallbackIsDown = false
         activeHoldSource = nil
         cancelPendingHoldStart()
+        cancelPendingFnRelease()
+        togglePressGate.end()
         toggleRecordingIsActive = false
         lastToggleTime = 0
     }
@@ -605,6 +636,12 @@ final class HotkeyController {
         }
 
         if let toggleSpec, toggleSpec.matchesKeyEvent(event), !isRepeat {
+            guard togglePressGate.begin(
+                at: ProcessInfo.processInfo.systemUptime,
+                isRepeat: isRepeat
+            ) else {
+                return nil
+            }
             guard handleToggleKeyDown(source: "toggle-cg-key") else {
                 return Unmanaged.passUnretained(event)
             }
@@ -623,6 +660,14 @@ final class HotkeyController {
     }
 
     private func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let keyCode = CGKeyCode(
+            event.getIntegerValueField(.keyboardEventKeycode)
+        )
+        if keyCode == CGKeyCode(kVK_Space), togglePressGate.isPressed {
+            togglePressGate.end()
+            return nil
+        }
+
         if let holdSpec, holdSpec.matchesFnKeyEvent(event) {
             if fnIsDown {
                 fnIsDown = false
@@ -694,6 +739,12 @@ final class HotkeyController {
         }
 
         if let toggleSpec, toggleSpec.matchesKeyEvent(snapshot) {
+            guard togglePressGate.begin(
+                at: ProcessInfo.processInfo.systemUptime,
+                isRepeat: snapshot.isRepeat
+            ) else {
+                return true
+            }
             guard handleToggleKeyDown(source: "toggle-nsevent-key") else {
                 return false
             }
@@ -735,6 +786,41 @@ final class HotkeyController {
             return
         }
 
+        if source.hasPrefix("fn-") {
+            scheduleFnHoldEnd(source: source)
+            return
+        }
+
+        completeHoldEnd(source: source)
+    }
+
+    private func scheduleFnHoldEnd(source: String) {
+        pendingFnReleaseTask?.cancel()
+        pendingFnReleaseTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(90))
+            guard let self, !Task.isCancelled else {
+                return
+            }
+
+            self.pendingFnReleaseTask = nil
+            let fnIsStillDown = CGEventSource.flagsState(
+                .combinedSessionState
+            ).contains(.maskSecondaryFn)
+            guard !fnIsStillDown else {
+                return
+            }
+
+            self.fnIsDown = false
+            self.hidFnIsDown = false
+            self.completeHoldEnd(source: source)
+        }
+    }
+
+    private func completeHoldEnd(source: String) {
+        guard activeHoldSource != nil else {
+            return
+        }
+
         activeHoldSource = nil
         LocalFlowLogger.log("Hotkey hold end source=\(source)")
         onDiagnosticEvent?("hold end: \(Self.displayName(for: source))")
@@ -742,6 +828,8 @@ final class HotkeyController {
     }
 
     private func requestFnHoldStart(source: String) {
+        cancelPendingFnRelease()
+
         guard toggleUsesFnModifier else {
             startHold(source: source)
             return
@@ -775,6 +863,11 @@ final class HotkeyController {
         pendingHoldTask = nil
         pendingHoldSource = nil
         return hadPendingHold
+    }
+
+    private func cancelPendingFnRelease() {
+        pendingFnReleaseTask?.cancel()
+        pendingFnReleaseTask = nil
     }
 
     private var toggleUsesFnModifier: Bool {
@@ -812,6 +905,7 @@ final class HotkeyController {
         lastToggleTime = now
         activeHoldSource = nil
         cancelPendingHoldStart()
+        cancelPendingFnRelease()
         toggleRecordingIsActive = true
         LocalFlowLogger.log("Hotkey hold locked source=\(source) holdSource=\(holdSource)")
         onDiagnosticEvent?("hold locked: \(Self.displayName(for: source))")
@@ -870,6 +964,12 @@ final class HotkeyController {
     }
 
     private func handleNSEventKeyUp(_ snapshot: HotkeyEventSnapshot) -> Bool {
+        if snapshot.keyCode == UInt16(kVK_Space),
+           togglePressGate.isPressed {
+            togglePressGate.end()
+            return true
+        }
+
         if let holdSpec, holdSpec.matchesFnKeyEvent(snapshot) {
             if fnIsDown {
                 fnIsDown = false
