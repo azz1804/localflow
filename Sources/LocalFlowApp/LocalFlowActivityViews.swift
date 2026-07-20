@@ -6,58 +6,63 @@ struct LocalFlowHomeView: View {
     @ObservedObject var model: LocalFlowHubModel
 
     private let columns = [
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14)
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
     ]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 HubPageHeader(
-                    eyebrow: "Local voice, serious speed",
+                    eyebrow: "",
                     title: greeting,
                     subtitle: homeSubtitle
                 ) {
                     Button {
                         model.refresh()
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 16, height: 16)
                     }
                     .buttonStyle(HubSecondaryButtonStyle())
+                    .help("Refresh")
                 }
 
-                HubRecordingHero(model: model)
+                HubRecordingHero(
+                    totalWords: model.insights.totalWords,
+                    orbThemeOverride: model.configuration.orbThemeOverride
+                )
 
-                LazyVGrid(columns: columns, spacing: 14) {
+                LazyVGrid(columns: columns, spacing: 12) {
                     HubMetricCard(
                         title: "Words dictated",
                         value: HubFormat.compact(model.insights.totalWords),
                         caption: "All time",
                         symbol: "textformat.abc",
-                        tint: HubPalette.purple
+                        tint: .primary.opacity(0.68)
                     )
                     HubMetricCard(
                         title: "Dictation speed",
                         value: "\(Int(model.insights.averageWordsPerMinute.rounded()))",
                         caption: "words per minute",
                         symbol: "speedometer",
-                        tint: HubPalette.blue
+                        tint: .primary.opacity(0.68)
                     )
                     HubMetricCard(
                         title: "Time saved",
                         value: HubFormat.duration(model.insights.estimatedTimeSavedSeconds),
                         caption: "vs. typing at 40 WPM",
                         symbol: "hourglass.bottomhalf.filled",
-                        tint: HubPalette.cyan
+                        tint: .primary.opacity(0.68)
                     )
                     HubMetricCard(
                         title: "Current streak",
                         value: "\(model.insights.currentStreakDays)",
                         caption: model.insights.currentStreakDays == 1 ? "active day" : "active days",
                         symbol: "flame.fill",
-                        tint: .orange
+                        tint: .primary.opacity(0.68)
                     )
                 }
 
@@ -70,7 +75,7 @@ struct LocalFlowHomeView: View {
                 }
             }
             .padding(.horizontal, 30)
-            .padding(.top, 34)
+            .padding(.top, 28)
             .padding(.bottom, 36)
         }
     }
@@ -90,7 +95,7 @@ struct LocalFlowHomeView: View {
         guard let last = model.historyRecords.first else {
             return "Your private voice workspace is ready."
         }
-        return "Last dictation \(last.createdAt.formatted(.relative(presentation: .named)))."
+        return "\(last.targetApplication?.displayName ?? "Last dictation") · \(HubFormat.relative(last.createdAt))"
     }
 
     private var weeklyActivity: some View {
@@ -99,7 +104,7 @@ struct LocalFlowHomeView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Voice activity")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 15, weight: .semibold))
                         Text("Words dictated over the last 7 days")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
@@ -110,7 +115,7 @@ struct LocalFlowHomeView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(HubPalette.purple)
+                    .foregroundStyle(.secondary)
                 }
 
                 Chart(Array(model.insights.dailyStats.suffix(7))) { stat in
@@ -120,7 +125,10 @@ struct LocalFlowHomeView: View {
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [HubPalette.purple, HubPalette.blue],
+                            colors: [
+                                Color.primary.opacity(0.38),
+                                Color.primary.opacity(0.72)
+                            ],
                             startPoint: .bottom,
                             endPoint: .top
                         )
@@ -130,7 +138,7 @@ struct LocalFlowHomeView: View {
                 .chartXAxis {
                     AxisMarks(values: .stride(by: .day)) {
                         AxisValueLabel(format: .dateTime.weekday(.narrow))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.primary.opacity(0.42))
                     }
                 }
                 .chartYAxis {
@@ -138,7 +146,7 @@ struct LocalFlowHomeView: View {
                         AxisGridLine()
                             .foregroundStyle(HubPalette.border)
                         AxisValueLabel()
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.primary.opacity(0.42))
                     }
                 }
                 .frame(height: 180)
@@ -151,7 +159,7 @@ struct LocalFlowHomeView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text("Recent activity")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .semibold))
                     Spacer()
                     Button {
                         model.selectedSection = .history
@@ -159,7 +167,7 @@ struct LocalFlowHomeView: View {
                         Image(systemName: "arrow.up.right")
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(HubPalette.purple)
+                    .foregroundStyle(.secondary)
                 }
 
                 if model.historyRecords.isEmpty {
@@ -180,10 +188,10 @@ struct LocalFlowHomeView: View {
                                 HStack(spacing: 10) {
                                     ZStack {
                                         Circle()
-                                            .fill(HubPalette.purple.opacity(0.1))
+                                            .fill(Color.primary.opacity(0.055))
                                         Image(systemName: "waveform")
                                             .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(HubPalette.purple)
+                                            .foregroundStyle(.secondary)
                                     }
                                     .frame(width: 30, height: 30)
 
@@ -192,7 +200,7 @@ struct LocalFlowHomeView: View {
                                             .font(.system(size: 11, weight: .medium))
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
-                                        Text("\(record.targetApplication?.displayName ?? "Unknown app") · \(record.createdAt.formatted(date: .omitted, time: .shortened))")
+                                        Text("\(record.targetApplication?.displayName ?? "Unknown app") · \(HubFormat.relative(record.createdAt))")
                                             .font(.system(size: 9))
                                             .foregroundStyle(.secondary)
                                     }
@@ -214,120 +222,1942 @@ struct LocalFlowHomeView: View {
 }
 
 private struct HubRecordingHero: View {
-    @ObservedObject var model: LocalFlowHubModel
-    @State private var pulse = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var totalWords: Int
+    var orbThemeOverride: String
 
     var body: some View {
-        HStack(spacing: 24) {
-            VStack(alignment: .leading, spacing: 13) {
+        HStack(spacing: 36) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                        .shadow(color: .green.opacity(0.7), radius: pulse ? 9 : 3)
-                    Text("LOCALFLOW IS READY")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .fill(Color(red: 0.24, green: 0.82, blue: 0.47))
+                        .frame(width: 7, height: 7)
+                    Text("LocalFlow is ready")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 Text("Speak naturally.\nWrite beautifully.")
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .font(.system(size: 29, weight: .semibold))
+                    .tracking(-0.5)
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Hold Fn in any app, then release to transcribe. Lock hands-free mode with Space and finish with Escape.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineSpacing(3)
+                Text("Hold Fn to talk. Release to write.")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.5))
                     .frame(maxWidth: 470, alignment: .leading)
 
-                HStack(spacing: 8) {
+                HStack(spacing: 9) {
                     HubKeycap("fn")
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.3))
-                    HubKeycap("space")
-                    Text("lock")
+                    Text("talk")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(.white.opacity(0.38))
+
+                    Circle()
+                        .fill(.white.opacity(0.16))
+                        .frame(width: 3, height: 3)
+
+                    HubKeycap("space")
+                    Text("hands-free")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.38))
+
+                    Circle()
+                        .fill(.white.opacity(0.16))
+                        .frame(width: 3, height: 3)
+
                     HubKeycap("esc")
                     Text("finish")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(.white.opacity(0.38))
                 }
             }
 
             Spacer()
 
-            ZStack {
-                Circle()
-                    .fill(HubPalette.purple.opacity(0.2))
-                    .frame(width: pulse ? 148 : 124, height: pulse ? 148 : 124)
-                    .blur(radius: 18)
-
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [HubPalette.purple, HubPalette.blue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 92, height: 92)
-                    .shadow(color: HubPalette.purple.opacity(0.5), radius: 26, y: 10)
-
-                Image(systemName: "waveform")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 160, height: 150)
+            HubOrbProgress(
+                totalWords: totalWords,
+                orbThemeOverride: orbThemeOverride
+            )
+                .frame(width: 174, height: 170)
         }
-        .padding(.horizontal, 26)
-        .padding(.vertical, 24)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 26)
         .background(
-            ZStack {
+            RoundedRectangle(
+                cornerRadius: HubRadius.hero,
+                style: .continuous
+            )
+            .fill(
                 LinearGradient(
                     colors: [
-                        Color(red: 0.11, green: 0.095, blue: 0.18),
-                        Color(red: 0.065, green: 0.075, blue: 0.15)
+                        Color(white: 0.105),
+                        Color(white: 0.065)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-
-                Circle()
-                    .fill(HubPalette.blue.opacity(0.2))
-                    .frame(width: 260, height: 260)
-                    .blur(radius: 70)
-                    .offset(x: 330, y: -80)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            )
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(
+                cornerRadius: HubRadius.hero,
+                style: .continuous
+            )
                 .stroke(
                     LinearGradient(
-                        colors: [.white.opacity(0.2), HubPalette.purple.opacity(0.3), .clear],
+                        colors: [
+                            .white.opacity(0.16),
+                            .white.opacity(0.055),
+                            .white.opacity(0.095)
+                        ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1
+                    lineWidth: 0.75
                 )
         }
-        .shadow(color: HubPalette.purple.opacity(0.12), radius: 26, y: 12)
-        .onAppear {
-            guard !reduceMotion else {
-                return
+        .shadow(color: .black.opacity(0.18), radius: 22, y: 12)
+    }
+}
+
+private struct HubOrbProgress: View {
+    var totalWords: Int
+    var orbThemeOverride: String
+
+    private var progression: OrbProgression {
+        OrbEvolution.progression(
+            forWords: totalWords,
+            overrideID: orbThemeOverride
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 3) {
+            ReferenceHubVoiceOrb(theme: progression.theme)
+
+            Text(progression.theme.name)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.76))
+
+            Text(progression.progressLabel)
+                .font(.system(size: 7.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.38))
+                .lineLimit(1)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.white.opacity(0.08))
+                    Capsule()
+                        .fill(
+                            progression.theme.rim.color.opacity(0.72)
+                        )
+                        .frame(
+                            width: proxy.size.width
+                                * progression.progressToNext
+                        )
+                }
             }
-            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                pulse = true
+            .frame(width: 92, height: 2)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(progression.theme.name), \(progression.progressLabel)"
+        )
+    }
+}
+
+struct OrbHoverInteraction {
+    var pointer = CGPoint(x: 0.5, y: 0.5)
+    var targetStrength: CGFloat = 0
+    private var transitionStart: TimeInterval = 0
+    private var transitionFrom: CGFloat = 0
+    private var storedVelocity = CGSize.zero
+    private var lastPointerUpdate: TimeInterval?
+
+    func strength(at time: TimeInterval) -> CGFloat {
+        guard transitionStart > 0 else {
+            return targetStrength
+        }
+        let duration = targetStrength > transitionFrom ? 0.18 : 0.3
+        let progress = max(
+            0,
+            min(1, CGFloat((time - transitionStart) / duration))
+        )
+        let easedProgress = progress * progress * (3 - 2 * progress)
+        return transitionFrom
+            + (targetStrength - transitionFrom) * easedProgress
+    }
+
+    func velocity(at time: TimeInterval) -> CGSize {
+        guard let lastPointerUpdate else {
+            return .zero
+        }
+        let elapsed = max(0, time - lastPointerUpdate)
+        let decay = CGFloat(exp(-elapsed * 7))
+        return CGSize(
+            width: storedVelocity.width * decay,
+            height: storedVelocity.height * decay
+        )
+    }
+
+    mutating func setActive(
+        _ active: Bool,
+        pointer newPointer: CGPoint? = nil,
+        at time: TimeInterval
+    ) {
+        if let newPointer {
+            if let lastPointerUpdate {
+                let elapsed = time - lastPointerUpdate
+                let decay = CGFloat(exp(-max(0, elapsed) * 7))
+                storedVelocity = CGSize(
+                    width: storedVelocity.width * decay,
+                    height: storedVelocity.height * decay
+                )
+                if elapsed >= 0.004, elapsed <= 0.1 {
+                    let rawVelocity = CGSize(
+                        width: (newPointer.x - pointer.x) / elapsed,
+                        height: (newPointer.y - pointer.y) / elapsed
+                    )
+                    storedVelocity = CGSize(
+                        width: storedVelocity.width * 0.65
+                            + max(-4, min(4, rawVelocity.width)) * 0.35,
+                        height: storedVelocity.height * 0.65
+                            + max(-4, min(4, rawVelocity.height)) * 0.35
+                    )
+                }
+            }
+            pointer = newPointer
+            lastPointerUpdate = time
+        }
+        let newTarget: CGFloat = active ? 1 : 0
+        guard newTarget != targetStrength else {
+            return
+        }
+        transitionFrom = strength(at: time)
+        transitionStart = time
+        targetStrength = newTarget
+    }
+}
+
+private struct ReferenceHubVoiceOrb: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoverInteraction = OrbHoverInteraction()
+
+    var theme: OrbTheme
+
+    private let diameter: CGFloat = 136
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1 / 60,
+                paused: reduceMotion
+            )
+        ) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let motionTime = time * theme.motionSpeed
+            let interactionStrength = reduceMotion
+                ? hoverInteraction.targetStrength
+                : hoverInteraction.strength(at: time)
+            let pointerVelocity = reduceMotion
+                ? CGSize.zero
+                : hoverInteraction.velocity(at: time)
+            let motion = LiquidOrbMotion.sample(
+                time: reduceMotion ? 0 : motionTime,
+                pointer: hoverInteraction.pointer,
+                interactionStrength: interactionStrength,
+                pointerVelocity: pointerVelocity
+            )
+            let breathing = reduceMotion
+                ? 1
+                : 1
+                    + sin(motionTime * 1.18)
+                        * theme.breathingAmplitude * 0.7
+                    + sin(motionTime * 0.47 + 1.3)
+                        * theme.breathingAmplitude * 0.3
+                    + interactionStrength * 0.012
+            let drift = reduceMotion
+                ? CGSize.zero
+                : CGSize(
+                    width: sin(time * 0.42) * 0.9,
+                    height: cos(time * 0.36 + 0.8) * 0.75
+                )
+
+            ReferenceLiquidOrbSurface(
+                motion: motion,
+                theme: theme
+            )
+                .frame(width: diameter, height: diameter)
+                .scaleEffect(breathing)
+                .offset(x: drift.width, y: drift.height)
+                .rotation3DEffect(
+                    .degrees(Double(-motion.tilt.height * 3.2)),
+                    axis: (x: 1, y: 0, z: 0)
+                )
+                .rotation3DEffect(
+                    .degrees(Double(motion.tilt.width * 3.2)),
+                    axis: (x: 0, y: 1, z: 0)
+                )
+                .contentShape(Circle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case let .active(location):
+                        let pointer = CGPoint(
+                            x: max(0, min(1, location.x / diameter)),
+                            y: max(0, min(1, location.y / diameter))
+                        )
+                        hoverInteraction.setActive(
+                            true,
+                            pointer: pointer,
+                            at: Date.timeIntervalSinceReferenceDate
+                        )
+                    case .ended:
+                        hoverInteraction.setActive(
+                            false,
+                            at: Date.timeIntervalSinceReferenceDate
+                        )
+                    }
+                }
+        }
+    }
+}
+
+private struct ReferenceLiquidOrbSurface: View {
+    var motion: LiquidOrbMotionSample
+    var theme: OrbTheme
+
+    var body: some View {
+        Canvas(
+            opaque: false,
+            colorMode: .extendedLinear,
+            rendersAsynchronously: true
+        ) { context, size in
+            renderOrb(context: &context, size: size)
+        }
+    }
+
+    private func renderOrb(
+        context: inout GraphicsContext,
+        size: CGSize
+    ) {
+        let orbRect = CGRect(origin: .zero, size: size)
+            .insetBy(dx: 4.5, dy: 4.5)
+        let blob = Path(
+            LiquidOrbGeometry.blobPath(
+                in: orbRect,
+                motion: motion,
+                detail: 96
+            )
+        )
+        let cursorOffset = CGPoint(
+            x: (motion.cursor.x - 0.5) * motion.interactionStrength,
+            y: (motion.cursor.y - 0.5) * motion.interactionStrength
+        )
+        let velocityOffset = CGSize(
+            width: max(-1, min(1, motion.cursorVelocity.width / 3)),
+            height: max(-1, min(1, motion.cursorVelocity.height / 3))
+        )
+        let coreCenter = CGPoint(
+            x: orbRect.midX
+                + sin(motion.phase * 0.41) * orbRect.width * 0.075
+                + motion.tilt.width * orbRect.width * 0.025
+                + cursorOffset.x * orbRect.width * 0.1
+                + velocityOffset.width * orbRect.width * 0.008,
+            y: orbRect.midY
+                + cos(motion.phase * 0.37) * orbRect.height * 0.055
+                + motion.tilt.height * orbRect.height * 0.025
+                + cursorOffset.y * orbRect.height * 0.1
+                + velocityOffset.height * orbRect.height * 0.008
+        )
+
+        context.drawLayer { glow in
+                glow.addFilter(.blur(radius: 8))
+                glow.fill(
+                    blob,
+                    with: .color(
+                        theme.primary.color
+                            .opacity(0.13)
+                    )
+                )
+            }
+
+        context.fill(
+                blob,
+                with: .radialGradient(
+                    Gradient(stops: [
+                        .init(
+                            color: theme.baseDark.color,
+                            location: 0
+                        ),
+                        .init(
+                            color: theme.primary.color,
+                            location: 0.34
+                        ),
+                        .init(
+                            color: theme.secondary.color,
+                            location: 0.72
+                        ),
+                        .init(
+                            color: theme.accent.color,
+                            location: 1
+                        )
+                    ]),
+                    center: coreCenter,
+                    startRadius: 0,
+                    endRadius: orbRect.width * 0.58
+                )
+            )
+
+        context.drawLayer { colorant in
+                colorant.clip(to: blob)
+                colorant.blendMode = .screen
+                colorant.fill(
+                    blob,
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            theme.highlight.color.opacity(0.5),
+                            theme.primary.color
+                                .opacity(0.12),
+                            theme.accent.color
+                                .opacity(0.32)
+                        ]),
+                        startPoint: CGPoint(
+                            x: orbRect.minX,
+                            y: orbRect.minY
+                        ),
+                        endPoint: CGPoint(
+                            x: orbRect.maxX,
+                            y: orbRect.maxY
+                        )
+                    )
+                )
+            }
+
+        drawLivingFields(
+            context: &context,
+            blob: blob,
+            orbRect: orbRect
+        )
+        drawMaterialSignature(
+            context: &context,
+            blob: blob,
+            orbRect: orbRect
+        )
+        drawFrontLiquidLens(
+            context: &context,
+            blob: blob,
+            orbRect: orbRect
+        )
+
+        context.drawLayer { depth in
+                depth.clip(to: blob)
+                depth.blendMode = .multiply
+                depth.addFilter(.blur(radius: 9))
+                let coreRect = CGRect(
+                    x: coreCenter.x - orbRect.width * 0.27,
+                    y: coreCenter.y - orbRect.height * 0.3,
+                    width: orbRect.width * 0.54,
+                    height: orbRect.height * 0.6
+                )
+                depth.fill(
+                    Path(ellipseIn: coreRect),
+                    with: .color(
+                        theme.baseDark.color
+                            .opacity(0.5)
+                    )
+                )
+
+                let leftDepth = CGRect(
+                    x: orbRect.minX - orbRect.width * 0.08,
+                    y: orbRect.minY + orbRect.height * 0.16,
+                    width: orbRect.width * 0.4,
+                    height: orbRect.height * 0.7
+                )
+                depth.fill(
+                    Path(ellipseIn: leftDepth),
+                    with: .color(
+                        theme.baseDark.color
+                            .opacity(0.3)
+                    )
+                )
+            }
+
+        context.drawLayer { sheen in
+                sheen.clip(to: blob)
+                sheen.blendMode = .screen
+                sheen.addFilter(.blur(radius: 5.5))
+                let sheenRect = CGRect(
+                    x: orbRect.minX + orbRect.width * 0.06
+                        + cursorOffset.x * orbRect.width * 0.16,
+                    y: orbRect.minY + orbRect.height * 0.02
+                        + cursorOffset.y * orbRect.height * 0.12,
+                    width: orbRect.width * 0.58,
+                    height: orbRect.height * 0.34
+                )
+                sheen.fill(
+                    Path(ellipseIn: sheenRect),
+                    with: .color(
+                        theme.highlight.color
+                            .opacity(0.34)
+                    )
+                )
+            }
+
+        drawLivingGlitter(
+            context: &context,
+            blob: blob,
+            orbRect: orbRect
+        )
+
+        if motion.interactionStrength > 0.001 {
+                let contactPoint = CGPoint(
+                    x: orbRect.minX + motion.cursor.x * orbRect.width,
+                    y: orbRect.minY + motion.cursor.y * orbRect.height
+                )
+                context.drawLayer { contactGlow in
+                    contactGlow.clip(to: blob)
+                    contactGlow.blendMode = .screen
+                    contactGlow.addFilter(.blur(radius: 6))
+                    let diameter = orbRect.width * (
+                        0.3 + motion.cursorPressure * 0.12
+                    )
+                    let contactRect = CGRect(
+                        x: contactPoint.x - diameter / 2,
+                        y: contactPoint.y - diameter / 2,
+                        width: diameter,
+                        height: diameter
+                    )
+                    contactGlow.fill(
+                        Path(ellipseIn: contactRect),
+                        with: .color(
+                            theme.highlight.color
+                                .opacity(
+                                    Double(
+                                        0.1
+                                            + motion.interactionStrength
+                                                * 0.2
+                                    )
+                                )
+                        )
+                    )
+                }
+
+                context.drawLayer { contactSpecular in
+                    contactSpecular.clip(to: blob)
+                    contactSpecular.blendMode = .screen
+                    contactSpecular.addFilter(.blur(radius: 1.4))
+                    let diameter = orbRect.width * 0.075
+                    contactSpecular.fill(
+                        Path(
+                            ellipseIn: CGRect(
+                                x: contactPoint.x - diameter / 2,
+                                y: contactPoint.y - diameter / 2,
+                                width: diameter,
+                                height: diameter
+                            )
+                        ),
+                        with: .color(
+                            theme.highlight.color.opacity(
+                                Double(
+                                    0.16
+                                        + motion.interactionStrength * 0.26
+                                )
+                            )
+                        )
+                    )
+            }
+    }
+
+        context.drawLayer { strandGlow in
+                strandGlow.clip(to: blob)
+                strandGlow.addFilter(.blur(radius: 4.4))
+
+                for index in [0, 2, 5] {
+                    let strand = Path(
+                        LiquidOrbGeometry.strandPath(
+                            in: orbRect,
+                            index: index,
+                            motion: motion
+                        )
+                    )
+                    let shimmer = 0.55 + 0.45 * sin(
+                        motion.phase * 0.7 + CGFloat(index) * 1.18
+                    )
+                    strandGlow.stroke(
+                        strand,
+                        with: .color(
+                            theme.accent.color
+                                .opacity(Double(0.05 + shimmer * 0.12))
+                        ),
+                        lineWidth: index.isMultiple(of: 2) ? 10.5 : 7.2
+                    )
+                }
+            }
+
+        context.drawLayer { ambientEdge in
+            ambientEdge.addFilter(.blur(radius: 4.6))
+            ambientEdge.stroke(
+                blob,
+                with: .linearGradient(
+                    Gradient(colors: [
+                        theme.highlight.color
+                            .opacity(0.18),
+                        theme.rim.color
+                            .opacity(0.1),
+                        theme.accent.color
+                            .opacity(0.14)
+                    ]),
+                    startPoint: CGPoint(
+                        x: orbRect.minX,
+                        y: orbRect.minY
+                    ),
+                    endPoint: CGPoint(
+                        x: orbRect.maxX,
+                        y: orbRect.maxY
+                    )
+                ),
+                lineWidth: 2.2
+            )
+        }
+
+        context.drawLayer { innerDepth in
+            innerDepth.clip(to: blob)
+            innerDepth.blendMode = .multiply
+            innerDepth.stroke(
+                blob,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(
+                            color: Color(
+                                red: 0.035,
+                                green: 0.008,
+                                blue: 0.12
+                            ).opacity(0.18),
+                            location: 0.5
+                        ),
+                        .init(
+                            color: Color(
+                                red: 0.015,
+                                green: 0.004,
+                                blue: 0.07
+                            ).opacity(0.54),
+                            location: 1
+                        )
+                    ]),
+                    startPoint: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.minY
+                    ),
+                    endPoint: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.maxY
+                    )
+                ),
+                lineWidth: 3.2
+            )
+        }
+
+        context.stroke(
+            blob,
+            with: .linearGradient(
+                Gradient(colors: [
+                    theme.highlight.color.opacity(0.56),
+                    theme.rim.color
+                        .opacity(0.3),
+                    theme.accent.color
+                        .opacity(0.2),
+                    theme.primary.color
+                        .opacity(0.18)
+                ]),
+                startPoint: CGPoint(
+                    x: orbRect.minX,
+                    y: orbRect.minY
+                ),
+                endPoint: CGPoint(
+                    x: orbRect.maxX,
+                    y: orbRect.maxY
+                )
+            ),
+            lineWidth: 0.58
+        )
+
+        context.drawLayer { glassEdge in
+            glassEdge.clip(to: blob)
+            glassEdge.blendMode = .screen
+            glassEdge.stroke(
+                blob,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(
+                            color: theme.highlight.color.opacity(0.6),
+                            location: 0
+                        ),
+                        .init(
+                            color: theme.rim.color.opacity(0.26),
+                            location: 0.38
+                        ),
+                        .init(color: .clear, location: 0.72)
+                    ]),
+                    startPoint: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.minY
+                    ),
+                    endPoint: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.maxY
+                    )
+                ),
+                lineWidth: 1.35
+            )
+        }
+    }
+
+    private func drawFrontLiquidLens(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        context.drawLayer { lens in
+            lens.clip(to: blob)
+            lens.fill(
+                blob,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(
+                            color: theme.highlight.color.opacity(0.08),
+                            location: 0
+                        ),
+                        .init(
+                            color: theme.primary.color.opacity(0.03),
+                            location: 0.34
+                        ),
+                        .init(
+                            color: theme.baseDark.color.opacity(0.12),
+                            location: 0.62
+                        ),
+                        .init(
+                            color: theme.baseDark.color.opacity(0.2),
+                            location: 1
+                        )
+                    ]),
+                    startPoint: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.minY
+                    ),
+                    endPoint: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.maxY
+                    )
+                )
+            )
+        }
+
+        context.drawLayer { lensBloom in
+            lensBloom.clip(to: blob)
+            lensBloom.blendMode = .screen
+            lensBloom.addFilter(.blur(radius: 7))
+            let lensRect = CGRect(
+                x: orbRect.minX + orbRect.width * 0.08,
+                y: orbRect.minY + orbRect.height * 0.03,
+                width: orbRect.width * 0.72,
+                height: orbRect.height * 0.28
+            )
+            lensBloom.fill(
+                Path(ellipseIn: lensRect),
+                with: .color(
+                    theme.highlight.color.opacity(0.13)
+                )
+            )
+        }
+    }
+
+    private func drawLivingFields(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        let oilOpacity: Double
+        let oilRadius: CGFloat
+        switch theme.material {
+        case .water:
+            oilOpacity = 0.2
+            oilRadius = 0.5
+        case .wind:
+            oilOpacity = 0.16
+            oilRadius = 0.54
+        case .earth:
+            oilOpacity = 0.3
+            oilRadius = 0.46
+        case .aurora:
+            oilOpacity = 0.18
+            oilRadius = 0.52
+        case .lava:
+            // Keep lava as a continuous cooling skin. A concentrated dark
+            // radial pocket reads as a black disc moving under the surface.
+            oilOpacity = 0.09
+            oilRadius = 0.68
+        case .galaxy:
+            oilOpacity = 0.4
+            oilRadius = 0.42
+        }
+
+        let fields: [(CGPoint, Color, CGFloat)] = [
+            (
+                motion.violet,
+                theme.secondary.color.opacity(0.34),
+                0.43 * theme.fieldScale
+            ),
+            (
+                motion.magenta,
+                theme.accent.color.opacity(0.26),
+                0.36 * theme.fieldScale
+            ),
+            (
+                motion.cyan,
+                theme.primary.color.opacity(0.2),
+                0.32 * theme.fieldScale
+            ),
+            (
+                motion.pearl,
+                theme.highlight.color.opacity(0.16),
+                0.24 * theme.fieldScale
+            )
+        ]
+
+        context.drawLayer { liquidFields in
+            liquidFields.clip(to: blob)
+            liquidFields.blendMode = .screen
+
+            for (normalizedPoint, color, radius) in fields {
+                liquidFields.fill(
+                    blob,
+                    with: .radialGradient(
+                        Gradient(colors: [color, .clear]),
+                        center: canvasPoint(
+                            normalizedPoint,
+                            in: orbRect
+                        ),
+                        startRadius: 0,
+                        endRadius: orbRect.width * radius
+                    )
+                )
             }
         }
+
+        context.drawLayer { oilDepth in
+            oilDepth.clip(to: blob)
+            oilDepth.blendMode = .multiply
+            oilDepth.fill(
+                blob,
+                with: .radialGradient(
+                    Gradient(colors: [
+                        theme.baseDark.color.opacity(oilOpacity),
+                        .clear
+                    ]),
+                    center: canvasPoint(motion.oil, in: orbRect),
+                    startRadius: 0,
+                    endRadius: orbRect.width * oilRadius
+                )
+            )
+        }
+    }
+
+    private func drawMaterialSignature(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        switch theme.material {
+        case .water:
+            drawWaterMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .wind:
+            drawWindMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .earth:
+            drawEarthMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .aurora:
+            drawAuroraMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .lava:
+            drawLavaMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .galaxy:
+            drawGalaxyMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        }
+    }
+
+    private func drawWaterMaterial(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        context.drawLayer { submergedCurrents in
+            submergedCurrents.clip(to: blob)
+            submergedCurrents.blendMode = .screen
+            submergedCurrents.addFilter(.blur(radius: 5.8))
+
+            for index in 0..<5 {
+                submergedCurrents.stroke(
+                    horizontalFlowPath(
+                        in: orbRect,
+                        level: 0.18 + CGFloat(index) * 0.16,
+                        phase: motion.phase * 0.72
+                            + CGFloat(index) * 1.43,
+                        amplitude: orbRect.height * (
+                            0.08 + CGFloat(index % 2) * 0.025
+                        )
+                    ),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            theme.secondary.color.opacity(0.02),
+                            theme.highlight.color.opacity(
+                                Double(0.1 + motion.energy * 0.06)
+                            ),
+                            theme.primary.color.opacity(0.03)
+                        ]),
+                        startPoint: CGPoint(
+                            x: orbRect.minX,
+                            y: orbRect.midY
+                        ),
+                        endPoint: CGPoint(
+                            x: orbRect.maxX,
+                            y: orbRect.midY
+                        )
+                    ),
+                    lineWidth: 4.5 + CGFloat(index % 3) * 2.2
+                )
+            }
+        }
+    }
+
+    private func drawWindMaterial(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        context.drawLayer { wind in
+            wind.clip(to: blob)
+            wind.blendMode = .screen
+            wind.addFilter(.blur(radius: 3.4))
+
+            for index in 0..<6 {
+                let path = windRibbonPath(
+                    in: orbRect,
+                    index: index,
+                    phase: motion.phase
+                )
+                let color = index.isMultiple(of: 2)
+                    ? theme.highlight.color
+                    : theme.accent.color
+                wind.stroke(
+                    path,
+                    with: .color(
+                        color.opacity(
+                            Double(0.045 + CGFloat(index % 3) * 0.025)
+                        )
+                    ),
+                    lineWidth: 2.8 + CGFloat(index % 3) * 1.4
+                )
+            }
+        }
+    }
+
+    private func drawEarthMaterial(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        context.drawLayer { strata in
+            strata.clip(to: blob)
+            strata.blendMode = .multiply
+            strata.addFilter(.blur(radius: 3.6))
+
+            for index in 0..<5 {
+                let path = horizontalFlowPath(
+                    in: orbRect,
+                    level: 0.3 + CGFloat(index) * 0.12,
+                    phase: motion.phase * 0.28 + CGFloat(index) * 0.72,
+                    amplitude: orbRect.height * 0.027
+                )
+                strata.stroke(
+                    path,
+                    with: .color(
+                        theme.baseDark.color.opacity(
+                            Double(0.16 + CGFloat(index % 2) * 0.08)
+                        )
+                    ),
+                    lineWidth: 5.2 + CGFloat(index % 3) * 2
+                )
+            }
+        }
+    }
+
+    private func drawAuroraMaterial(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        context.drawLayer { veil in
+            veil.clip(to: blob)
+            veil.blendMode = .screen
+            veil.addFilter(.blur(radius: 3.2))
+
+            for index in 0..<6 {
+                let strand = Path(
+                    LiquidOrbGeometry.strandPath(
+                        in: orbRect,
+                        index: index,
+                        motion: motion
+                    )
+                )
+                veil.stroke(
+                    strand,
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            theme.secondary.color.opacity(0.03),
+                            theme.highlight.color.opacity(0.22),
+                            theme.accent.color.opacity(0.08)
+                        ]),
+                        startPoint: CGPoint(
+                            x: orbRect.minX,
+                            y: orbRect.minY
+                        ),
+                        endPoint: CGPoint(
+                            x: orbRect.maxX,
+                            y: orbRect.maxY
+                        )
+                    ),
+                    lineWidth: 4.5 + CGFloat(index % 3) * 2.2
+                )
+            }
+        }
+    }
+
+    private func drawLavaMaterial(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        let crustPlates = (0..<8).map {
+            lavaCrustPlatePath(
+                in: orbRect,
+                index: $0,
+                phase: motion.phase
+            )
+        }
+        var crustNetwork = Path()
+        for plate in crustPlates {
+            crustNetwork.addPath(plate)
+        }
+
+        context.drawLayer { coolingSkin in
+            coolingSkin.clip(to: blob)
+            coolingSkin.blendMode = .multiply
+            coolingSkin.addFilter(.blur(radius: 4.8))
+            coolingSkin.fill(
+                blob,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(
+                            color: theme.baseDark.color.opacity(0.34),
+                            location: 0
+                        ),
+                        .init(
+                            color: theme.primary.color.opacity(0.1),
+                            location: 0.44
+                        ),
+                        .init(
+                            color: theme.baseDark.color.opacity(0.3),
+                            location: 1
+                        )
+                    ]),
+                    startPoint: CGPoint(
+                        x: orbRect.minX,
+                        y: orbRect.minY
+                    ),
+                    endPoint: CGPoint(
+                        x: orbRect.maxX,
+                        y: orbRect.maxY
+                    )
+                )
+            )
+
+            for (index, plate) in crustPlates.enumerated() {
+                coolingSkin.fill(
+                    plate,
+                    with: .color(
+                        theme.baseDark.color.opacity(
+                            Double(0.22 + CGFloat(index % 3) * 0.035)
+                        )
+                    )
+                )
+            }
+        }
+
+        context.drawLayer { heatBloom in
+            heatBloom.clip(to: blob)
+            heatBloom.blendMode = .screen
+            heatBloom.addFilter(.blur(radius: 6.4))
+
+            heatBloom.stroke(
+                crustNetwork,
+                with: .color(
+                    theme.secondary.color.opacity(
+                        Double(0.28 + motion.energy * 0.2)
+                    )
+                ),
+                lineWidth: 6.2 + motion.energy * 2.6
+            )
+        }
+
+        context.drawLayer { moltenFissures in
+            moltenFissures.clip(to: blob)
+            moltenFissures.blendMode = .screen
+            moltenFissures.addFilter(.blur(radius: 2.7))
+
+            moltenFissures.stroke(
+                crustNetwork,
+                with: .linearGradient(
+                    Gradient(colors: [
+                        theme.secondary.color.opacity(0.38),
+                        theme.accent.color.opacity(
+                            Double(0.46 + motion.energy * 0.14)
+                        ),
+                        theme.secondary.color.opacity(0.34)
+                    ]),
+                    startPoint: CGPoint(
+                        x: orbRect.minX,
+                        y: orbRect.minY
+                    ),
+                    endPoint: CGPoint(
+                        x: orbRect.maxX,
+                        y: orbRect.maxY
+                    )
+                ),
+                lineWidth: 1.8 + motion.energy * 0.7
+            )
+        }
+
+        context.drawLayer { convection in
+            convection.clip(to: blob)
+            convection.blendMode = .screen
+            convection.addFilter(.blur(radius: 8))
+
+            for index in 0..<3 {
+                convection.stroke(
+                    lavaConvectionPath(
+                        in: orbRect,
+                        index: index,
+                        phase: motion.phase
+                    ),
+                    with: .color(
+                        theme.primary.color.opacity(
+                            Double(0.1 + motion.energy * 0.08)
+                        )
+                    ),
+                    lineWidth: orbRect.width * 0.11
+                )
+            }
+        }
+    }
+
+    private func drawGalaxyMaterial(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        context.drawLayer { galaxy in
+            galaxy.clip(to: blob)
+            galaxy.blendMode = .screen
+            galaxy.addFilter(.blur(radius: 2.8))
+
+            for arm in 0..<2 {
+                galaxy.stroke(
+                    galaxySpiralPath(
+                        in: orbRect,
+                        phase: motion.phase * 0.24
+                            + CGFloat(arm) * .pi
+                    ),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            theme.highlight.color.opacity(0.32),
+                            theme.accent.color.opacity(0.14),
+                            .clear
+                        ]),
+                        startPoint: CGPoint(
+                            x: orbRect.midX,
+                            y: orbRect.midY
+                        ),
+                        endPoint: CGPoint(
+                            x: orbRect.maxX,
+                            y: orbRect.minY
+                        )
+                    ),
+                    lineWidth: arm == 0 ? 1.6 : 0.9
+                )
+            }
+
+            galaxy.fill(
+                blob,
+                with: .radialGradient(
+                    Gradient(colors: [
+                        theme.highlight.color.opacity(0.2),
+                        theme.accent.color.opacity(0.05),
+                        .clear
+                    ]),
+                    center: CGPoint(
+                        x: orbRect.midX,
+                        y: orbRect.midY
+                    ),
+                    startRadius: 0,
+                    endRadius: orbRect.width * 0.2
+                )
+            )
+        }
+    }
+
+    private func lavaCrustPlatePath(
+        in rect: CGRect,
+        index: Int,
+        phase: CGFloat
+    ) -> Path {
+        let centers = [
+            CGPoint(x: 0.18, y: 0.2),
+            CGPoint(x: 0.48, y: 0.16),
+            CGPoint(x: 0.78, y: 0.26),
+            CGPoint(x: 0.24, y: 0.5),
+            CGPoint(x: 0.58, y: 0.46),
+            CGPoint(x: 0.84, y: 0.58),
+            CGPoint(x: 0.38, y: 0.78),
+            CGPoint(x: 0.7, y: 0.82)
+        ]
+        let baseCenter = centers[index % centers.count]
+        let center = canvasPoint(
+            CGPoint(
+                x: baseCenter.x + sin(
+                    phase * 0.045 + CGFloat(index) * 1.7
+                ) * 0.012,
+                y: baseCenter.y + cos(
+                    phase * 0.04 + CGFloat(index) * 1.3
+                ) * 0.01
+            ),
+            in: rect
+        )
+        let radiusX = rect.width * (
+            0.19 + CGFloat(index % 3) * 0.018
+        )
+        let radiusY = rect.height * (
+            0.15 + CGFloat(index % 2) * 0.025
+        )
+        let vertexCount = 8
+        let path = CGMutablePath()
+
+        for vertex in 0..<vertexCount {
+            let angle = CGFloat(vertex) / CGFloat(vertexCount) * .pi * 2
+                + CGFloat(index) * 0.37
+            let roughness = 0.82 + 0.18 * sin(
+                CGFloat(vertex) * 2.31
+                    + CGFloat(index) * 1.43
+                    + phase * 0.025
+            )
+            let point = CGPoint(
+                x: center.x + cos(angle) * radiusX * roughness,
+                y: center.y + sin(angle) * radiusY * roughness
+            )
+            if vertex == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        path.closeSubpath()
+        return Path(path)
+    }
+
+    private func lavaConvectionPath(
+        in rect: CGRect,
+        index: Int,
+        phase: CGFloat
+    ) -> Path {
+        let path = CGMutablePath()
+        let level = 0.24 + CGFloat(index) * 0.27
+        let sway = sin(phase * 0.32 + CGFloat(index) * 2.1)
+        path.move(to: CGPoint(
+            x: rect.minX - rect.width * 0.12,
+            y: rect.minY + rect.height * level
+        ))
+        path.addCurve(
+            to: CGPoint(
+                x: rect.maxX + rect.width * 0.12,
+                y: rect.minY + rect.height * (level + sway * 0.06)
+            ),
+            control1: CGPoint(
+                x: rect.minX + rect.width * 0.28,
+                y: rect.minY + rect.height * (level + 0.15 * sway)
+            ),
+            control2: CGPoint(
+                x: rect.minX + rect.width * 0.72,
+                y: rect.minY + rect.height * (level - 0.13 * sway)
+            )
+        )
+        return Path(path)
+    }
+
+    private func horizontalFlowPath(
+        in rect: CGRect,
+        level: CGFloat,
+        phase: CGFloat,
+        amplitude: CGFloat
+    ) -> Path {
+        let path = CGMutablePath()
+        let start = CGPoint(
+            x: rect.minX - rect.width * 0.08,
+            y: rect.minY + rect.height * level
+        )
+        let end = CGPoint(
+            x: rect.maxX + rect.width * 0.08,
+            y: start.y + sin(phase * 0.7) * amplitude * 0.42
+        )
+        path.move(to: start)
+        path.addCurve(
+            to: end,
+            control1: CGPoint(
+                x: rect.minX + rect.width * 0.27,
+                y: start.y + sin(phase) * amplitude
+            ),
+            control2: CGPoint(
+                x: rect.minX + rect.width * 0.72,
+                y: start.y - cos(phase * 0.82) * amplitude
+            )
+        )
+        return Path(path)
+    }
+
+    private func windRibbonPath(
+        in rect: CGRect,
+        index: Int,
+        phase: CGFloat
+    ) -> Path {
+        let path = CGMutablePath()
+        let level = 0.2 + CGFloat(index) * 0.12
+        let sway = sin(phase * 1.36 + CGFloat(index) * 0.82)
+        let start = CGPoint(
+            x: rect.minX - rect.width * 0.1,
+            y: rect.minY + rect.height * level
+                + sway * rect.height * 0.04
+        )
+        let end = CGPoint(
+            x: rect.maxX + rect.width * 0.1,
+            y: rect.minY + rect.height * (
+                level + 0.06 * cos(phase + CGFloat(index))
+            )
+        )
+        path.move(to: start)
+        path.addCurve(
+            to: end,
+            control1: CGPoint(
+                x: rect.minX + rect.width * 0.34,
+                y: start.y - rect.height * 0.11 * sway
+            ),
+            control2: CGPoint(
+                x: rect.minX + rect.width * 0.68,
+                y: end.y + rect.height * 0.1 * sway
+            )
+        )
+        return Path(path)
+    }
+
+    private func galaxySpiralPath(
+        in rect: CGRect,
+        phase: CGFloat
+    ) -> Path {
+        let path = CGMutablePath()
+        let points = 72
+
+        for index in 0..<points {
+            let progress = CGFloat(index) / CGFloat(points - 1)
+            let angle = progress * .pi * 3.8 + phase
+            let radius = rect.width * (0.035 + progress * 0.38)
+            let point = CGPoint(
+                x: rect.midX + cos(angle) * radius,
+                y: rect.midY + sin(angle) * radius * 0.62
+            )
+            if index == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        return Path(path)
+    }
+
+    private func drawLivingGlitter(
+        context: inout GraphicsContext,
+        blob: Path,
+        orbRect: CGRect
+    ) {
+        guard theme.material == .galaxy else {
+            return
+        }
+
+        let visibleIndices = Array(
+            motion.sparkles.indices.prefix(
+                min(motion.sparkles.count, theme.sparkleCount)
+            )
+        )
+
+        context.drawLayer { glitter in
+            glitter.clip(to: blob)
+            glitter.blendMode = .screen
+
+            for index in visibleIndices {
+                let sparkle = motion.sparkles[index]
+                let center = canvasPoint(sparkle.position, in: orbRect)
+                let diameter = orbRect.width * 0.009 * sparkle.scale
+                let tint = sparkle.warmth > 0.55
+                    ? theme.accent.color
+                    : theme.highlight.color
+                glitter.fill(
+                    Path(
+                        ellipseIn: CGRect(
+                            x: center.x - diameter / 2,
+                            y: center.y - diameter / 2,
+                            width: diameter,
+                            height: diameter
+                        )
+                    ),
+                    with: .color(
+                        tint.opacity(
+                            Double(sparkle.opacity * 0.42)
+                        )
+                    )
+                )
+            }
+        }
+    }
+
+    private func canvasPoint(
+        _ normalizedPoint: CGPoint,
+        in rect: CGRect
+    ) -> CGPoint {
+        CGPoint(
+            x: rect.minX + normalizedPoint.x * rect.width,
+            y: rect.minY + normalizedPoint.y * rect.height
+        )
+    }
+}
+
+private struct HubVoiceOrb: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pointerLocation: CGPoint?
+
+    private let diameter: CGFloat = 112
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: pointerLocation == nil ? 1 / 15 : 1 / 60,
+                paused: reduceMotion
+            )
+        ) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let motion = LiquidOrbMotion.sample(
+                time: reduceMotion ? 0 : time,
+                pointer: pointerLocation
+            )
+            let breathing = reduceMotion
+                ? 1
+                : 1
+                    + sin(time * 1.45) * 0.014
+                    + motion.interactionStrength * 0.022
+
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(red: 0.3, green: 0.56, blue: 1)
+                                    .opacity(0.32),
+                                Color(red: 0.62, green: 0.28, blue: 1)
+                                    .opacity(0.16),
+                                .clear
+                            ],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 76
+                        )
+                    )
+                    .blur(radius: 13)
+                    .scaleEffect(breathing * 1.12)
+
+                ZStack {
+                    Circle()
+                        .fill(
+                            AngularGradient(
+                                colors: [
+                                    Color(red: 0.025, green: 0.055, blue: 0.19),
+                                    Color(red: 0.12, green: 0.16, blue: 0.48),
+                                    Color(red: 0.34, green: 0.12, blue: 0.52),
+                                    Color(red: 0.08, green: 0.29, blue: 0.46),
+                                    Color(red: 0.025, green: 0.055, blue: 0.19)
+                                ],
+                                center: .center,
+                                angle: .degrees(motion.flowAngle)
+                            )
+                        )
+
+                    HubLiquidBlob(
+                        color: Color(red: 0.03, green: 0.76, blue: 1),
+                        center: motion.cyan,
+                        size: CGSize(width: 94, height: 72),
+                        opacity: 0.78,
+                        rotation: motion.flowAngle * 0.7
+                    )
+                    HubLiquidBlob(
+                        color: Color(red: 0.43, green: 0.25, blue: 1),
+                        center: motion.violet,
+                        size: CGSize(width: 104, height: 84),
+                        opacity: 0.82,
+                        rotation: -motion.flowAngle * 0.48
+                    )
+                    HubLiquidBlob(
+                        color: Color(red: 0.96, green: 0.16, blue: 0.73),
+                        center: motion.magenta,
+                        size: CGSize(width: 74, height: 58),
+                        opacity: 0.68,
+                        rotation: motion.flowAngle * 0.9 + 18
+                    )
+                    HubLiquidBlob(
+                        color: Color(red: 1, green: 0.58, blue: 0.12),
+                        center: motion.gold,
+                        size: CGSize(width: 56, height: 42),
+                        opacity: 0.5,
+                        rotation: -motion.flowAngle * 0.76
+                    )
+
+                    HubLiquidMembrane(
+                        time: reduceMotion ? 0 : time,
+                        motion: motion
+                    )
+
+                    HubLiquidBlob(
+                        color: Color(red: 0.74, green: 0.9, blue: 1),
+                        center: motion.pearl,
+                        size: CGSize(width: 42, height: 30),
+                        opacity: 0.3,
+                        rotation: motion.flowAngle
+                    )
+
+                    HubLiquidCaustics(
+                        time: reduceMotion ? 0 : time,
+                        motion: motion
+                    )
+
+                    HubLiquidGlitter(motion: motion)
+                }
+                .clipShape(Circle())
+                .scaleEffect(breathing)
+                .compositingGroup()
+
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                .white.opacity(0.52),
+                                Color(red: 0.62, green: 0.88, blue: 1)
+                                    .opacity(0.1),
+                                .clear
+                            ],
+                            center: UnitPoint(
+                                x: motion.highlight.x,
+                                y: motion.highlight.y
+                            ),
+                            startRadius: 0,
+                            endRadius: 68
+                        )
+                    )
+                    .blendMode(.screen)
+
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.52),
+                                .white.opacity(0.07),
+                                Color(red: 0.5, green: 0.42, blue: 1)
+                                    .opacity(0.34)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+                    .padding(1)
+            }
+            .frame(width: diameter, height: diameter)
+            .scaleEffect(breathing)
+            .rotation3DEffect(
+                .degrees(Double(-motion.tilt.height * 5)),
+                axis: (x: 1, y: 0, z: 0)
+            )
+            .rotation3DEffect(
+                .degrees(Double(motion.tilt.width * 5)),
+                axis: (x: 0, y: 1, z: 0)
+            )
+            .shadow(
+                color: Color(red: 0.38, green: 0.38, blue: 1)
+                    .opacity(0.22),
+                radius: 20,
+                y: 8
+            )
+            .contentShape(Circle())
+            .onContinuousHover { phase in
+                switch phase {
+                case let .active(location):
+                    pointerLocation = CGPoint(
+                        x: max(0, min(1, location.x / diameter)),
+                        y: max(0, min(1, location.y / diameter))
+                    )
+                case .ended:
+                    pointerLocation = nil
+                }
+            }
+        }
+    }
+}
+
+private struct HubLiquidBlob: View {
+    var color: Color
+    var center: CGPoint
+    var size: CGSize
+    var opacity: Double
+    var rotation: CGFloat
+
+    var body: some View {
+        Ellipse()
+            .fill(
+                RadialGradient(
+                    colors: [
+                        color.opacity(opacity),
+                        color.opacity(opacity * 0.44),
+                        .clear
+                    ],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: max(size.width, size.height) / 2
+                )
+            )
+            .frame(width: size.width, height: size.height)
+            .position(
+                x: center.x * 112,
+                y: center.y * 112
+            )
+            .rotationEffect(.degrees(rotation))
+            .blur(radius: 4.8)
+            .blendMode(.plusLighter)
+    }
+}
+
+private struct HubLiquidMembrane: View {
+    var time: TimeInterval
+    var motion: LiquidOrbMotionSample
+
+    var body: some View {
+        Canvas(
+            opaque: false,
+            colorMode: .extendedLinear,
+            rendersAsynchronously: true
+        ) { context, size in
+            let path = membranePath(in: size)
+            let start = CGPoint(
+                x: motion.oil.x * size.width - size.width * 0.2,
+                y: motion.oil.y * size.height - size.height * 0.18
+            )
+            let end = CGPoint(
+                x: motion.oil.x * size.width + size.width * 0.23,
+                y: motion.oil.y * size.height + size.height * 0.21
+            )
+
+            context.drawLayer { liquid in
+                liquid.addFilter(.blur(radius: 0.9))
+                liquid.fill(
+                    path,
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.015, green: 0.03, blue: 0.12)
+                                .opacity(0.86),
+                            Color(red: 0.18, green: 0.07, blue: 0.34)
+                                .opacity(0.82),
+                            Color(red: 0.68, green: 0.14, blue: 0.68)
+                                .opacity(0.56),
+                            Color(red: 0.04, green: 0.7, blue: 0.94)
+                                .opacity(0.48)
+                        ]),
+                        startPoint: start,
+                        endPoint: end
+                    )
+                )
+            }
+
+            context.stroke(
+                path,
+                with: .linearGradient(
+                    Gradient(colors: [
+                        .white.opacity(0.3),
+                        Color(red: 0.28, green: 0.88, blue: 1)
+                            .opacity(0.36),
+                        Color(red: 1, green: 0.36, blue: 0.72)
+                            .opacity(0.28),
+                        .white.opacity(0.08)
+                    ]),
+                    startPoint: CGPoint(x: 0, y: 0),
+                    endPoint: CGPoint(x: size.width, y: size.height)
+                ),
+                lineWidth: 0.8
+            )
+        }
+        .blendMode(.screen)
+    }
+
+    private func membranePath(in size: CGSize) -> Path {
+        let center = CGPoint(
+            x: motion.oil.x * size.width,
+            y: motion.oil.y * size.height
+        )
+        let baseRadius = size.width * (
+            0.205 + motion.turbulence * 0.025
+        )
+        let steps = 32
+        var points: [CGPoint] = []
+
+        for index in 0..<steps {
+            let progress = CGFloat(index) / CGFloat(steps)
+            let angle = progress * .pi * 2
+            let firstLobe = CGFloat(
+                sin(Double(angle) * 3 + time * 0.74)
+            ) * (0.11 + motion.turbulence * 0.035)
+            let secondLobe = CGFloat(
+                cos(Double(angle) * 5 - time * 0.46)
+            ) * 0.055
+            let radius = baseRadius * (1 + firstLobe + secondLobe)
+            points.append(
+                CGPoint(
+                    x: center.x + cos(angle) * radius * 1.16,
+                    y: center.y + sin(angle) * radius * 0.84
+                )
+            )
+        }
+
+        var path = Path()
+        guard let first = points.first,
+              let last = points.last else {
+            return path
+        }
+        path.move(to: midpoint(last, first))
+
+        for index in points.indices {
+            let point = points[index]
+            let next = points[(index + 1) % points.count]
+            path.addQuadCurve(
+                to: midpoint(point, next),
+                control: point
+            )
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private func midpoint(_ first: CGPoint, _ second: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (first.x + second.x) / 2,
+            y: (first.y + second.y) / 2
+        )
+    }
+}
+
+private struct HubLiquidGlitter: View {
+    var motion: LiquidOrbMotionSample
+
+    var body: some View {
+        Canvas(
+            opaque: false,
+            colorMode: .extendedLinear,
+            rendersAsynchronously: true
+        ) { context, size in
+            context.drawLayer { glow in
+                glow.addFilter(.blur(radius: 1.1))
+                drawParticles(
+                    in: &glow,
+                    size: size,
+                    opacityScale: 0.55,
+                    sizeScale: 1.7
+                )
+            }
+            drawParticles(
+                in: &context,
+                size: size,
+                opacityScale: 1,
+                sizeScale: 1
+            )
+        }
+        .blendMode(.screen)
+    }
+
+    private func drawParticles(
+        in context: inout GraphicsContext,
+        size: CGSize,
+        opacityScale: CGFloat,
+        sizeScale: CGFloat
+    ) {
+        for sparkle in motion.sparkles {
+            let diameter = (0.75 + sparkle.scale * 0.9) * sizeScale
+            let rect = CGRect(
+                x: sparkle.position.x * size.width - diameter / 2,
+                y: sparkle.position.y * size.height - diameter / 2,
+                width: diameter,
+                height: diameter
+            )
+            let color = Color(
+                red: 0.68 + sparkle.warmth * 0.3,
+                green: 0.86 - sparkle.warmth * 0.14,
+                blue: 1 - sparkle.warmth * 0.26
+            )
+            context.fill(
+                Path(ellipseIn: rect),
+                with: .color(
+                    color.opacity(
+                        Double(sparkle.opacity * opacityScale)
+                    )
+                )
+            )
+        }
+    }
+}
+
+private struct HubLiquidCaustics: View {
+    var time: TimeInterval
+    var motion: LiquidOrbMotionSample
+
+    var body: some View {
+        Canvas(
+            opaque: false,
+            colorMode: .extendedLinear,
+            rendersAsynchronously: true
+        ) { context, size in
+            context.addFilter(.blur(radius: 0.7))
+
+            let tilt = motion.tilt.height * size.height * 0.09
+            let wobble = CGFloat(sin(time * 2.7))
+                * (2.2 + motion.interactionStrength * 1.8)
+            let firstY = size.height * 0.48 + tilt + wobble
+
+            var firstWave = Path()
+            firstWave.move(to: CGPoint(x: -8, y: firstY))
+            firstWave.addCurve(
+                to: CGPoint(
+                    x: size.width + 4,
+                    y: firstY - 7 - wobble * 0.4
+                ),
+                control1: CGPoint(
+                    x: size.width * 0.28,
+                    y: firstY - 10 - wobble
+                ),
+                control2: CGPoint(
+                    x: size.width * 0.7,
+                    y: firstY + 6 + wobble
+                )
+            )
+            context.stroke(
+                firstWave,
+                with: .color(.white.opacity(0.2)),
+                lineWidth: 0.85
+            )
+
+            let secondY = size.height * 0.62 - tilt * 0.7
+                + CGFloat(cos(time * 2.1)) * 2
+            var secondWave = Path()
+            secondWave.move(
+                to: CGPoint(x: size.width * 0.08, y: secondY + 4)
+            )
+            secondWave.addCurve(
+                to: CGPoint(
+                    x: size.width * 0.88,
+                    y: secondY - 5
+                ),
+                control1: CGPoint(
+                    x: size.width * 0.34,
+                    y: secondY + 8
+                ),
+                control2: CGPoint(
+                    x: size.width * 0.64,
+                    y: secondY - 7
+                )
+            )
+            context.stroke(
+                secondWave,
+                with: .color(
+                    Color(red: 0.72, green: 0.9, blue: 1)
+                        .opacity(0.12)
+                ),
+                lineWidth: 0.7
+            )
+
+            let thirdY = size.height * 0.34
+                + motion.tilt.width * size.width * 0.06
+                + CGFloat(sin(time * 1.76 + 1.4)) * 1.8
+            var thirdWave = Path()
+            thirdWave.move(
+                to: CGPoint(x: size.width * 0.18, y: thirdY - 3)
+            )
+            thirdWave.addCurve(
+                to: CGPoint(
+                    x: size.width * 0.78,
+                    y: thirdY + 5
+                ),
+                control1: CGPoint(
+                    x: size.width * 0.36,
+                    y: thirdY - 7
+                ),
+                control2: CGPoint(
+                    x: size.width * 0.6,
+                    y: thirdY + 7
+                )
+            )
+            context.stroke(
+                thirdWave,
+                with: .color(
+                    Color(red: 1, green: 0.72, blue: 0.92)
+                        .opacity(0.1)
+                ),
+                lineWidth: 0.55
+            )
+        }
+        .blendMode(.plusLighter)
     }
 }
 
@@ -837,29 +2667,33 @@ struct HubMetricCard: View {
     let tint: Color
 
     var body: some View {
-        HubCard(padding: 16) {
-            VStack(alignment: .leading, spacing: 14) {
+        HubCard(padding: 15) {
+            VStack(alignment: .leading, spacing: 13) {
                 HStack {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(tint.opacity(0.11))
+                        RoundedRectangle(
+                            cornerRadius: HubRadius.control,
+                            style: .continuous
+                        )
+                        .fill(tint.opacity(0.085))
                         Image(systemName: symbol)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(tint)
+                            .foregroundStyle(tint.opacity(0.9))
                     }
-                    .frame(width: 34, height: 34)
+                    .frame(width: 33, height: 33)
 
                     Spacer()
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(value)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .semibold))
+                        .monospacedDigit()
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     Text(title)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.primary)
                     Text(caption)
                         .font(.system(size: 9))
@@ -976,5 +2810,15 @@ enum HubFormat {
             return "YESTERDAY"
         }
         return date.formatted(date: .abbreviated, time: .omitted).uppercased()
+    }
+
+    static func relative(_ date: Date) -> String {
+        if abs(date.timeIntervalSinceNow) < 5 {
+            return "just now"
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "en")
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }

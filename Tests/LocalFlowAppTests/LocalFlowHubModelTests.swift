@@ -42,6 +42,38 @@ final class LocalFlowHubModelTests: XCTestCase {
     }
 
     @MainActor
+    func testInsertingTranscriptUpdatesHistorySelectionAndInsightsImmediately() {
+        let older = record(text: "one two", app: "Messages")
+        let newest = record(text: "three four five", app: "Terminal")
+        let model = LocalFlowHubModel()
+        model.update(
+            configuration: AppConfiguration(),
+            dictionary: .empty,
+            historyRecords: [older],
+            diagnosticInfo: diagnosticInfo
+        )
+
+        model.insertHistoryRecord(newest)
+
+        XCTAssertEqual(model.historyRecords.map(\.id), [newest.id, older.id])
+        XCTAssertEqual(model.selectedHistoryID, newest.id)
+        XCTAssertEqual(model.insights.totalWords, 5)
+        XCTAssertEqual(model.insights.totalDictations, 2)
+    }
+
+    @MainActor
+    func testInsertingSameTranscriptDoesNotDuplicateHistory() {
+        let transcript = record(text: "hello world", app: "Notes")
+        let model = LocalFlowHubModel()
+
+        model.insertHistoryRecord(transcript)
+        model.insertHistoryRecord(transcript)
+
+        XCTAssertEqual(model.historyRecords.map(\.id), [transcript.id])
+        XCTAssertEqual(model.insights.totalDictations, 1)
+    }
+
+    @MainActor
     func testDictionaryEditorProducesNormalizedDictionary() {
         let model = LocalFlowHubModel()
         model.termsText = "Codex\ncodex\nLocalFlow"

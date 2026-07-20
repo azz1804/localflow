@@ -8,7 +8,7 @@ struct LocalFlowHubView: View {
         ZStack(alignment: .bottomTrailing) {
             HStack(spacing: 0) {
                 HubSidebar(model: model)
-                    .frame(width: 218)
+                    .frame(width: 212)
 
                 ZStack {
                     HubPalette.canvas
@@ -78,9 +78,9 @@ private struct HubSidebar: View {
                 .padding(.horizontal, 20)
 
             Text("YOUR VOICE WORKSPACE")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(.system(size: 9, weight: .semibold))
                 .tracking(1.2)
-                .foregroundStyle(.white.opacity(0.34))
+                .foregroundStyle(.white.opacity(0.3))
                 .padding(.top, 26)
                 .padding(.bottom, 10)
                 .padding(.horizontal, 22)
@@ -144,12 +144,15 @@ private struct HubSidebar: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [HubPalette.purple, HubPalette.blue],
+                            colors: [
+                                HubPalette.purple,
+                                HubPalette.blue.opacity(0.9)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .shadow(color: HubPalette.purple.opacity(0.42), radius: 14, y: 5)
+                    .shadow(color: HubPalette.purple.opacity(0.2), radius: 12, y: 5)
 
                 Image(systemName: "waveform")
                     .font(.system(size: 18, weight: .bold))
@@ -159,7 +162,7 @@ private struct HubSidebar: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("LocalFlow")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                 Text("Private dictation")
                     .font(.system(size: 11, weight: .medium))
@@ -173,7 +176,7 @@ private struct HubSidebar: View {
             HStack {
                 Image(systemName: "mic.fill")
                     .foregroundStyle(HubPalette.purple)
-                Text("Ready to dictate")
+                Text("Ready")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
                 Spacer()
@@ -232,8 +235,8 @@ private struct HubSidebarButton: View {
                             ? AnyShapeStyle(
                                 LinearGradient(
                                     colors: [
-                                        HubPalette.purple.opacity(0.8),
-                                        HubPalette.blue.opacity(0.66)
+                                        .white.opacity(0.105),
+                                        .white.opacity(0.075)
                                     ],
                                     startPoint: .leading,
                                     endPoint: .trailing
@@ -245,8 +248,8 @@ private struct HubSidebarButton: View {
             .overlay(alignment: .leading) {
                 if isSelected {
                     Capsule()
-                        .fill(.white.opacity(0.92))
-                        .frame(width: 3, height: 18)
+                        .fill(HubPalette.purple.opacity(0.9))
+                        .frame(width: 2, height: 18)
                         .offset(x: -3)
                 }
             }
@@ -277,13 +280,15 @@ struct HubPageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(eyebrow.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.3)
-                    .foregroundStyle(HubPalette.purple)
+                if !eyebrow.isEmpty {
+                    Text(eyebrow.uppercased())
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.15)
+                        .foregroundStyle(.secondary)
+                }
 
                 Text(title)
-                    .font(.system(size: 29, weight: .bold, design: .rounded))
+                    .font(.system(size: 29, weight: .semibold))
                     .foregroundStyle(.primary)
 
                 Text(subtitle)
@@ -308,18 +313,73 @@ extension HubPageHeader where Trailing == EmptyView {
 struct HubCard<Content: View>: View {
     var padding: CGFloat = 20
     @ViewBuilder let content: () -> Content
+    @State private var hoverLocation: CGPoint?
 
     var body: some View {
         content()
             .padding(padding)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(HubPalette.card)
-                    .shadow(color: .black.opacity(0.055), radius: 18, y: 8)
-            )
+            .background {
+                GeometryReader { proxy in
+                    ZStack {
+                        RoundedRectangle(
+                            cornerRadius: HubRadius.card,
+                            style: .continuous
+                        )
+                        .fill(HubPalette.card)
+
+                        if let hoverLocation {
+                            RadialGradient(
+                                colors: [
+                                    Color.primary.opacity(0.045),
+                                    Color.primary.opacity(0)
+                                ],
+                                center: UnitPoint(
+                                    x: max(
+                                        0,
+                                        min(1, hoverLocation.x / proxy.size.width)
+                                    ),
+                                    y: max(
+                                        0,
+                                        min(1, hoverLocation.y / proxy.size.height)
+                                    )
+                                ),
+                                startRadius: 0,
+                                endRadius: 150
+                            )
+                        }
+                    }
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: HubRadius.card,
+                            style: .continuous
+                        )
+                    )
+                    .shadow(color: .black.opacity(0.06), radius: 16, y: 7)
+                }
+            }
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(HubPalette.border, lineWidth: 1)
+                RoundedRectangle(
+                    cornerRadius: HubRadius.card,
+                    style: .continuous
+                )
+                .stroke(
+                    Color.primary.opacity(hoverLocation == nil ? 0.07 : 0.12),
+                    lineWidth: 0.75
+                )
+            }
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: HubRadius.card,
+                    style: .continuous
+                )
+            )
+            .onContinuousHover { phase in
+                switch phase {
+                case let .active(location):
+                    hoverLocation = location
+                case .ended:
+                    hoverLocation = nil
+                }
             }
     }
 }
@@ -408,11 +468,18 @@ private struct HubToast: View {
 }
 
 enum HubPalette {
-    static let purple = Color(red: 0.68, green: 0.25, blue: 0.96)
-    static let blue = Color(red: 0.25, green: 0.42, blue: 0.98)
-    static let cyan = Color(red: 0.15, green: 0.74, blue: 0.95)
+    static let purple = Color(red: 0.49, green: 0.39, blue: 0.98)
+    static let blue = Color(red: 0.35, green: 0.48, blue: 0.96)
+    static let cyan = Color(red: 0.35, green: 0.72, blue: 0.9)
     static let canvas = Color(nsColor: .windowBackgroundColor)
     static let card = Color(nsColor: .controlBackgroundColor)
     static let softFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.5)
     static let border = Color.primary.opacity(0.075)
+}
+
+enum HubRadius {
+    static let card: CGFloat = 18
+    static let hero: CGFloat = 22
+    static let control: CGFloat = 10
+    static let compact: CGFloat = 8
 }

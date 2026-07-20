@@ -160,6 +160,16 @@ struct LocalFlowSettingsView: View {
                 }
 
                 HubSettingsSection(
+                    symbol: "circle.hexagongrid.fill",
+                    title: "Orb Lab",
+                    subtitle: "Administrator override for color, matter, and motion."
+                ) {
+                    HubOrbThemePicker(
+                        selection: $model.configuration.orbThemeOverride
+                    )
+                }
+
+                HubSettingsSection(
                     symbol: "sparkles",
                     title: "OpenAI & transcription",
                     subtitle: "Your API key remains in LocalFlow's local application data."
@@ -313,6 +323,160 @@ struct LocalFlowSettingsView: View {
             .padding(.top, 34)
             .padding(.bottom, 36)
         }
+    }
+}
+
+private struct HubOrbThemePicker: View {
+    @Binding var selection: String
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    selection = "automatic"
+                }
+            } label: {
+                HStack(spacing: 11) {
+                    ZStack {
+                        Circle()
+                            .fill(HubPalette.softFill)
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HubPalette.purple)
+                    }
+                    .frame(width: 32, height: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Automatic progression")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Unlock materials naturally as your word count grows.")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    selectionMark(isSelected: selection == "automatic")
+                }
+                .padding(11)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(HubPalette.softFill.opacity(0.5))
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(
+                            selection == "automatic"
+                                ? HubPalette.purple.opacity(0.7)
+                                : Color.primary.opacity(0.08),
+                            lineWidth: selection == "automatic" ? 1.2 : 0.7
+                        )
+                }
+            }
+            .buttonStyle(.plain)
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(OrbEvolution.themes) { theme in
+                    orbButton(theme)
+                }
+            }
+
+            Label(
+                "Administrator mode unlocks every material immediately. Save settings to apply it to the floating bar.",
+                systemImage: "lock.open.fill"
+            )
+            .font(.system(size: 8.5, weight: .medium))
+            .foregroundStyle(.secondary)
+        }
+        .padding(16)
+    }
+
+    private func orbButton(_ theme: OrbTheme) -> some View {
+        let isSelected = selection == theme.id
+
+        return Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                selection = theme.id
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                theme.highlight.color,
+                                theme.secondary.color,
+                                theme.primary.color,
+                                theme.baseDark.color
+                            ],
+                            center: .topLeading,
+                            startRadius: 0,
+                            endRadius: 25
+                        )
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                theme.rim.color.opacity(0.58),
+                                lineWidth: 0.7
+                            )
+                    }
+                    .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(theme.name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                    Label(theme.material.name, systemImage: theme.material.symbol)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 2)
+                selectionMark(isSelected: isSelected)
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? theme.primary.color.opacity(0.1)
+                            : HubPalette.softFill.opacity(0.28)
+                    )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        isSelected
+                            ? theme.rim.color.opacity(0.76)
+                            : Color.primary.opacity(0.07),
+                        lineWidth: isSelected ? 1.2 : 0.7
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .help(theme.material.tagline)
+        .accessibilityLabel(
+            "\(theme.name), \(theme.material.name). \(theme.material.tagline)"
+        )
+        .accessibilityAddTraits(
+            isSelected ? [.isSelected] : []
+        )
+    }
+
+    private func selectionMark(isSelected: Bool) -> some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(
+                isSelected ? HubPalette.purple : .secondary.opacity(0.45)
+            )
     }
 }
 

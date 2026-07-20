@@ -3,7 +3,10 @@ import LocalFlowCore
 
 @MainActor
 final class DictationController {
-    var onStatusChanged: ((AppStatus, Float) -> Void)?
+    var onStatusChanged: ((AppStatus, AudioVisualizationFrame) -> Void)?
+    var onRecordingFrame: ((AppStatus, AudioVisualizationFrame) -> Void)?
+    var onHistoryRecordCreated: ((DictationRecord) -> Void)?
+    var onInsertionCompleted: ((TextInsertionOutcome) -> Void)?
     var isPolishEnabled: Bool {
         get { configuration.enablePolish }
         set { configuration.enablePolish = newValue }
@@ -19,8 +22,9 @@ final class DictationController {
 
     private var status: AppStatus = .idle
     private var recordingTargetApplication: TargetApplicationInfo?
+    private var recordingInsertionTarget: TextInsertionTarget?
     private var recordingStartedAt: Date?
-    private var recordingTask: Task<Void, Never>?
+    private var recordingFrameDriver: RecordingFrameDriver?
     private var isStarting = false
     private var isProcessing = false
     private var shouldStopWhenStarted = false
@@ -94,7 +98,20 @@ final class DictationController {
     }
 
     func lockCurrentHoldRecording() {
-        guard audioRecorder.isRecording, recordingMode == .hold else {
+        guard recordingMode == .hold else {
+            return
+        }
+
+        if isStarting {
+            recordingMode = .toggle
+            LocalFlowLogger.log(
+                "Recording lock queued while recorder is starting"
+            )
+            setStatus(.recording(0, .toggle))
+            return
+        }
+
+        guard audioRecorder.isRecording else {
             return
         }
 
@@ -124,17 +141,18 @@ final class DictationController {
 
         guard openAIClient != nil else {
             LocalFlowLogger.log("Recording start failed missing OpenAI key")
-            setStatus(.error("Missing OPENAI_API_KEY in .env"), level: 0)
+            setStatus(.error("Missing OPENAI_API_KEY in .env"))
             return
         }
 
         isStarting = true
         shouldStopWhenStarted = false
         recordingMode = mode
-        setStatus(.recording(0, recordingMode), level: 0.1)
+        setStatus(.recording(0, recordingMode))
 
         do {
             recordingTargetApplication = activeApplicationProvider.currentApplication()
+            recordingInsertionTarget = insertionService.captureTarget()
             LocalFlowLogger.log("Recording start target=\(recordingTargetApplication?.bundleIdentifier ?? "-")")
             try await audioRecorder.start()
             recordingStartedAt = Date()
@@ -148,13 +166,15 @@ final class DictationController {
                 return
             }
 
-            setStatus(.recording(0, recordingMode), level: 0.1)
+            setStatus(.recording(0, recordingMode))
             startRecordingStatusLoop()
         } catch {
             isStarting = false
             shouldStopWhenStarted = false
+            recordingTargetApplication = nil
+            recordingInsertionTarget = nil
             LocalFlowLogger.log("Recording start failed error=\(error.localizedDescription)")
-            setStatus(.error(error.localizedDescription), level: 0)
+            setStatus(.error(error.localizedDescription))
         }
     }
 
@@ -163,8 +183,8 @@ final class DictationController {
             return
         }
 
-        recordingTask?.cancel()
-        recordingTask = nil
+        recordingFrameDriver?.stop()
+        recordingFrameDriver = nil
 
         let result: RecordingResult
 
@@ -172,15 +192,23 @@ final class DictationController {
             result = try audioRecorder.stop()
             LocalFlowLogger.log("Recording stopped duration=\(String(format: "%.2f", result.durationSeconds))")
         } catch {
+            recordingTargetApplication = nil
+            recordingInsertionTarget = nil
+            recordingStartedAt = nil
+            recordingMode = .hold
             LocalFlowLogger.log("Recording stop failed error=\(error.localizedDescription)")
-            setStatus(.error(error.localizedDescription), level: 0)
+            setStatus(.error(error.localizedDescription))
             return
         }
 
         guard result.durationSeconds >= 0.25 else {
             removeTemporaryFile(result.fileURL)
+            recordingTargetApplication = nil
+            recordingInsertionTarget = nil
+            recordingStartedAt = nil
+            recordingMode = .hold
             LocalFlowLogger.log("Recording discarded tooShort duration=\(String(format: "%.2f", result.durationSeconds))")
-            setStatus(.error("Recording was too short."), level: 0)
+            setStatus(.error("Recording was too short."))
             return
         }
 
@@ -192,17 +220,18 @@ final class DictationController {
         defer {
             isProcessing = false
             recordingTargetApplication = nil
+            recordingInsertionTarget = nil
             recordingStartedAt = nil
             recordingMode = .hold
             removeTemporaryFile(result.fileURL)
         }
 
         guard let openAIClient else {
-            setStatus(.error("Missing OPENAI_API_KEY in .env"), level: 0)
+            setStatus(.error("Missing OPENAI_API_KEY in .env"))
             return
         }
 
-        setStatus(.processing, level: 0)
+        setStatus(.processing)
         LocalFlowLogger.log("Processing started duration=\(String(format: "%.2f", result.durationSeconds))")
 
         let targetApplication = recordingTargetApplication
@@ -234,40 +263,47 @@ final class DictationController {
                 polished = true
             }
 
-            try historyStore.append(
-                DictationRecord(
-                    targetApplication: targetApplication,
-                    transcribedText: transcribedText,
-                    finalText: finalText,
-                    polished: polished,
-                    durationSeconds: result.durationSeconds
-                )
+            let record = DictationRecord(
+                targetApplication: targetApplication,
+                transcribedText: transcribedText,
+                finalText: finalText,
+                polished: polished,
+                durationSeconds: result.durationSeconds
             )
+            try historyStore.append(record)
+            onHistoryRecordCreated?(record)
+            LocalFlowLogger.log("History appended id=\(record.id)")
 
-            try await insertionService.paste(
+            let insertionOutcome = try await insertionService.paste(
                 text: finalText,
                 restoreClipboard: configuration.restoreClipboardAfterPaste,
-                restoreDelayMilliseconds: configuration.pasteRestoreDelayMilliseconds
+                restoreDelayMilliseconds: configuration.pasteRestoreDelayMilliseconds,
+                target: recordingInsertionTarget
             )
-            LocalFlowLogger.log("Paste finished chars=\(finalText.count)")
+            onInsertionCompleted?(insertionOutcome)
+            switch insertionOutcome {
+            case .pasted:
+                LocalFlowLogger.log("Paste finished chars=\(finalText.count)")
+            case .copiedToClipboard:
+                LocalFlowLogger.log(
+                    "No editable target; transcript kept on clipboard chars=\(finalText.count)"
+                )
+            }
 
-            setStatus(.done(finalText), level: 0)
+            setStatus(.done(finalText, insertionOutcome))
         } catch {
             LocalFlowLogger.log("Processing failed error=\(error.localizedDescription)")
-            setStatus(.error(error.localizedDescription), level: 0)
+            setStatus(.error(error.localizedDescription))
         }
     }
 
     private func startRecordingStatusLoop() {
-        recordingTask?.cancel()
-        recordingTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 40_000_000)
-                await MainActor.run {
-                    self?.refreshRecordingStatus()
-                }
-            }
+        recordingFrameDriver?.stop()
+        let driver = RecordingFrameDriver { [weak self] in
+            self?.refreshRecordingStatus()
         }
+        recordingFrameDriver = driver
+        driver.start()
     }
 
     private func refreshRecordingStatus() {
@@ -276,12 +312,20 @@ final class DictationController {
         }
 
         let duration = Date().timeIntervalSince(recordingStartedAt)
-        setStatus(.recording(duration, recordingMode), level: audioRecorder.currentPowerLevel())
+        let recordingStatus = AppStatus.recording(duration, recordingMode)
+        status = recordingStatus
+        onRecordingFrame?(
+            recordingStatus,
+            audioRecorder.currentVisualizationFrame()
+        )
     }
 
-    private func setStatus(_ status: AppStatus, level: Float) {
+    private func setStatus(
+        _ status: AppStatus,
+        visualization: AudioVisualizationFrame = .silent
+    ) {
         self.status = status
-        onStatusChanged?(status, level)
+        onStatusChanged?(status, visualization)
     }
 
     private func removeTemporaryFile(_ url: URL) {

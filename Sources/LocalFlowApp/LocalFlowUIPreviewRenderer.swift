@@ -17,6 +17,18 @@ enum LocalFlowUIPreviewRenderer {
             colorScheme: .dark,
             to: outputDirectory.appendingPathComponent("localflow-home.png")
         )
+        for theme in OrbEvolution.themes {
+            let themedModel = makeModel()
+            themedModel.configuration.orbThemeOverride = theme.id
+            try renderHub(
+                model: themedModel,
+                section: .home,
+                colorScheme: .dark,
+                to: outputDirectory.appendingPathComponent(
+                    "localflow-home-\(theme.id).png"
+                )
+            )
+        }
         try renderHub(
             model: model,
             section: .history,
@@ -31,13 +43,43 @@ enum LocalFlowUIPreviewRenderer {
         )
         try renderHub(
             model: model,
+            section: .settings,
+            colorScheme: .dark,
+            to: outputDirectory.appendingPathComponent("localflow-settings.png")
+        )
+        try renderHub(
+            model: model,
             section: .home,
             colorScheme: .light,
             to: outputDirectory.appendingPathComponent("localflow-home-light.png")
         )
         try renderFloatingBar(
+            hovered: false,
+            orbThemeOverride: "automatic",
             to: outputDirectory.appendingPathComponent("localflow-flowbar.png")
         )
+        try renderFloatingBar(
+            hovered: true,
+            orbThemeOverride: "automatic",
+            to: outputDirectory.appendingPathComponent("localflow-flowbar-hover.png")
+        )
+        try renderFloatingBar(
+            hovered: false,
+            processing: true,
+            orbThemeOverride: "automatic",
+            to: outputDirectory.appendingPathComponent(
+                "localflow-flowbar-processing.png"
+            )
+        )
+        for theme in OrbEvolution.themes {
+            try renderFloatingBar(
+                hovered: false,
+                orbThemeOverride: theme.id,
+                to: outputDirectory.appendingPathComponent(
+                    "localflow-flowbar-\(theme.id).png"
+                )
+            )
+        }
     }
 
     private static func renderHub(
@@ -70,19 +112,72 @@ enum LocalFlowUIPreviewRenderer {
         window.orderOut(nil)
     }
 
-    private static func renderFloatingBar(to outputURL: URL) throws {
-        let view = FloatingBarView(frame: NSRect(x: 0, y: 0, width: 420, height: 86))
-        view.status = .recording(18.4, .toggle)
+    private static func renderFloatingBar(
+        hovered: Bool,
+        processing: Bool = false,
+        orbThemeOverride: String,
+        to outputURL: URL
+    ) throws {
+        let view = FloatingBarView(
+            frame: NSRect(
+                origin: .zero,
+                size: FloatingBarController.panelSize
+            )
+        )
+        let window = NSWindow(
+            contentRect: view.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = view
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.orderFrontRegardless()
+        view.updateOrbProgression(
+            totalWords: 0,
+            overrideID: orbThemeOverride
+        )
 
-        let levels: [Float] = [
-            0.06, 0.12, 0.28, 0.62, 0.91, 0.7, 0.34, 0.18, 0.4, 0.82,
-            0.58, 0.24, 0.12, 0.36, 0.76, 0.94, 0.56, 0.2, 0.1, 0.32,
-            0.68, 0.44, 0.16, 0.08, 0.22, 0.5, 0.79, 0.52, 0.2, 0.08
+        let liveEnvelope: [Float] = [
+            0.74, 0.92, 0.7, 0.82, 0.54, 0.68, 0.4,
+            0.5, 0.28, 0.34, 0.2, 0.24, 0.14, 0.08
         ]
-        for level in levels {
-            view.pushWaveformSample(level, reduceMotion: false)
+        for index in 0..<4 {
+            view.update(
+                status: .recording(18.4, .toggle),
+                visualization: AudioVisualizationFrame(
+                    sequence: UInt64(index + 1),
+                    sample: AudioWaveformSample(
+                        rootMeanSquare: 0.58,
+                        positivePeak: 0.92,
+                        negativePeak: 0.84
+                    ),
+                    liveEnvelope: liveEnvelope,
+                    voiceLevel: 0.88
+                ),
+                reduceMotion: false
+            )
         }
+        if hovered {
+            view.setHoveredForPreview(
+                true,
+                location: NSPoint(x: 210, y: 36)
+            )
+        }
+        if processing {
+            view.update(
+                status: .processing,
+                visualization: .silent,
+                reduceMotion: false
+            )
+        }
+        view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(
+            until: Date().addingTimeInterval(processing ? 0.46 : 0.24)
+        )
         try writePNG(of: view, to: outputURL)
+        window.orderOut(nil)
     }
 
     private static func writePNG(of view: NSView, to outputURL: URL) throws {

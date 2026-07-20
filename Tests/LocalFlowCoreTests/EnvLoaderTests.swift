@@ -26,7 +26,8 @@ final class EnvLoaderTests: XCTestCase {
             "OPENAI_API_KEY": "sk-test",
             "ENABLE_POLISH": "yes",
             "HISTORY_RETENTION_DAYS": "14",
-            "PASTE_RESTORE_DELAY_MS": "1200"
+            "PASTE_RESTORE_DELAY_MS": "1200",
+            "ORB_THEME": "solar-nova"
         ])
 
         XCTAssertTrue(configuration.isOpenAIConfigured)
@@ -35,6 +36,7 @@ final class EnvLoaderTests: XCTestCase {
         XCTAssertTrue(configuration.enablePolish)
         XCTAssertEqual(configuration.historyRetentionDays, 14)
         XCTAssertEqual(configuration.pasteRestoreDelayMilliseconds, 1200)
+        XCTAssertEqual(configuration.orbThemeOverride, "solar-nova")
     }
 
     func testConfigurationCanRoundTripThroughEnvFile() {
@@ -49,7 +51,8 @@ final class EnvLoaderTests: XCTestCase {
             toggleHotkey: "fn+space",
             historyRetentionDays: 45,
             restoreClipboardAfterPaste: false,
-            pasteRestoreDelayMilliseconds: 500
+            pasteRestoreDelayMilliseconds: 500,
+            orbThemeOverride: "cosmic-ink"
         )
 
         let parsed = EnvLoader.parse(configuration.envFileContents())

@@ -89,13 +89,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let floatingBarController = FloatingBarController()
-        dictationController.onStatusChanged = { [weak self] status, level in
-            self?.floatingBarController?.update(status: status, level: level)
+        dictationController.onStatusChanged = { [weak self] status, visualization in
+            self?.floatingBarController?.update(
+                status: status,
+                visualization: visualization
+            )
             self?.updateMenu(for: status)
             if case .recording = status {
                 return
             }
             self?.hotkeyController?.clearToggleRecordingState()
+        }
+        dictationController.onRecordingFrame = { [weak self] status, visualization in
+            self?.floatingBarController?.update(
+                status: status,
+                visualization: visualization
+            )
+        }
+        dictationController.onHistoryRecordCreated = { [weak self] record in
+            self?.settingsWindowController?.insertHistoryRecord(record)
+            self?.refreshOrbProgression()
+        }
+        dictationController.onInsertionCompleted = { [weak self] outcome in
+            self?.settingsWindowController?.showInsertionOutcome(outcome)
         }
 
         let hotkeyController = HotkeyController(
@@ -125,17 +141,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
         self.hotkeyController = hotkeyController
+        refreshOrbProgression()
         refreshPermissionMenuState()
 
         if !PermissionManager.isAccessibilityTrusted(prompt: false) {
-            floatingBarController.update(status: .error("Enable Accessibility so LocalFlow can paste into the active app."), level: 0)
+            floatingBarController.update(
+                status: .error("Enable Accessibility so LocalFlow can paste into the active app.")
+            )
             requestAccessibilityPermission()
         }
 
         if !started {
             scheduleHotkeyRetryAfterPermissionPrompt()
         } else if fnListenerNeedsInputMonitoring {
-            floatingBarController.update(status: .error("Enable Input Monitoring for Fn. Option+Space can be used meanwhile."), level: 0)
+            floatingBarController.update(
+                status: .error("Enable Input Monitoring for Fn. Option+Space can be used meanwhile.")
+            )
             requestInputMonitoringPermission()
         }
     }
@@ -240,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LocalFlowLogger.log("Fatal startup error=\(error.localizedDescription)")
 
         if let floatingBarController {
-            floatingBarController.update(status: .error(error.localizedDescription), level: 0)
+            floatingBarController.update(status: .error(error.localizedDescription))
             return
         }
 
@@ -280,6 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentMainWindow(selectHistory: Bool, selectHome: Bool = false) {
+        refreshOrbProgression()
         let settingsWindowController = self.settingsWindowController ?? SettingsWindowController()
         configureSettingsWindowCallbacks(settingsWindowController)
         settingsWindowController.update(
@@ -311,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             polishMenuItem.state = configuration.enablePolish ? .on : .off
             showMainWindow()
         } catch {
-            floatingBarController?.update(status: .error(error.localizedDescription), level: 0)
+            floatingBarController?.update(status: .error(error.localizedDescription))
         }
     }
 
@@ -438,6 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.envSourceURL = url
                 self.configuration = updatedConfiguration
                 try HistoryStore(url: self.historyURL).prune(retentionDays: updatedConfiguration.historyRetentionDays)
+                self.refreshOrbProgression()
                 self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
                 self.restartHotkeys()
                 self.polishMenuItem.state = updatedConfiguration.enablePolish ? .on : .off
@@ -471,6 +494,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             do {
                 try HistoryStore(url: self.historyURL).clear()
+                self.floatingBarController?.updateTotalWords(
+                    0,
+                    overrideID: self.configuration.orbThemeOverride
+                )
                 return .success(())
             } catch {
                 return .failure(error)
@@ -489,7 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.polishMenuItem.state = self.configuration.enablePolish ? .on : .off
                 self.presentMainWindow(selectHistory: false)
             } catch {
-                self.floatingBarController?.update(status: .error(error.localizedDescription), level: 0)
+                self.floatingBarController?.update(status: .error(error.localizedDescription))
             }
         }
 
@@ -539,6 +566,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func loadHistoryRecords() -> [DictationRecord] {
         (try? HistoryStore(url: historyURL).load(limit: 500)) ?? []
+    }
+
+    private func refreshOrbProgression() {
+        let totalWords = DictationInsightsCalculator.make(
+            records: loadHistoryRecords()
+        ).totalWords
+        floatingBarController?.updateTotalWords(
+            totalWords,
+            overrideID: configuration.orbThemeOverride
+        )
     }
 
     private static let timeFormatter: DateFormatter = {

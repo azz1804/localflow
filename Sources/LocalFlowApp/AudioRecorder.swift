@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 
 struct RecordingResult {
@@ -27,17 +26,17 @@ enum AudioRecorderError: Error, LocalizedError {
 }
 
 @MainActor
-final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
-    private var recorder: AVAudioRecorder?
+final class AudioRecorder {
+    private let capture = MicrophoneAudioCapture()
     private var recordingURL: URL?
     private var startedAt: Date?
 
     var isRecording: Bool {
-        recorder?.isRecording == true
+        recordingURL != nil
     }
 
     func start() async throws {
-        guard recorder == nil else {
+        guard !isRecording else {
             throw AudioRecorderError.alreadyRecording
         }
 
@@ -48,64 +47,40 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("LocalFlow-\(UUID().uuidString)")
-            .appendingPathExtension("m4a")
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
+            .appendingPathExtension("wav")
 
         do {
-            let audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-            audioRecorder.delegate = self
-            audioRecorder.isMeteringEnabled = true
-            audioRecorder.prepareToRecord()
-
-            guard audioRecorder.record() else {
-                throw AudioRecorderError.couldNotStart
-            }
-
-            recorder = audioRecorder
+            try capture.start(recordingURL: url)
             recordingURL = url
             startedAt = Date()
         } catch {
+            try? capture.stop()
             try? FileManager.default.removeItem(at: url)
             throw error
         }
     }
 
     func stop() throws -> RecordingResult {
-        guard let recorder, let recordingURL, let startedAt else {
+        guard let recordingURL, let startedAt else {
             throw AudioRecorderError.notRecording
         }
 
-        recorder.stop()
-        self.recorder = nil
-        self.recordingURL = nil
-        self.startedAt = nil
+        defer {
+            self.recordingURL = nil
+            self.startedAt = nil
+        }
 
+        try capture.stop()
         return RecordingResult(
             fileURL: recordingURL,
             durationSeconds: max(0, Date().timeIntervalSince(startedAt))
         )
     }
 
-    func currentPowerLevel() -> Float {
-        guard let recorder, recorder.isRecording else {
-            return 0
+    func currentVisualizationFrame() -> AudioVisualizationFrame {
+        guard isRecording else {
+            return .silent
         }
-
-        recorder.updateMeters()
-        let average = Self.normalizedPower(recorder.averagePower(forChannel: 0))
-        let peak = Self.normalizedPower(recorder.peakPower(forChannel: 0))
-        return min(1, average * 0.72 + peak * 0.28)
-    }
-
-    private static func normalizedPower(_ decibels: Float) -> Float {
-        let noiseFloor: Float = -55
-        let linear = max(0, min(1, (decibels - noiseFloor) / -noiseFloor))
-        return pow(linear, 0.72)
+        return capture.currentFrame()
     }
 }

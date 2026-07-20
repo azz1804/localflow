@@ -8,6 +8,8 @@ DEST_APP="$DEST_DIR/$APP_NAME"
 
 cd "$ROOT_DIR"
 
+APP_PATH="$("$ROOT_DIR/Scripts/build_app.sh")"
+
 osascript -e 'tell application "LocalFlow" to quit' >/dev/null 2>&1 || true
 sleep 1
 
@@ -16,7 +18,6 @@ if pgrep -x LocalFlow >/dev/null 2>&1; then
   sleep 1
 fi
 
-APP_PATH="$("$ROOT_DIR/Scripts/build_app.sh")"
 SUPPORT_DIR="$HOME/Library/Application Support/LocalFlow"
 SUPPORT_ENV="$SUPPORT_DIR/.env"
 
@@ -38,6 +39,10 @@ else
   mkdir -p "$DEST_DIR"
   rm -rf "$DEST_APP"
   ditto "$APP_PATH" "$DEST_APP"
+fi
+
+if command -v codesign >/dev/null 2>&1; then
+  codesign --verify --deep --strict "$DEST_APP"
 fi
 
 open "$DEST_APP"

@@ -30,4 +30,4 @@ fi
 
 echo
 echo "App bundle after build:"
-echo "$ROOT_DIR/.build/release/LocalFlow.app"
+echo "${LOCALFLOW_BUNDLE_OUTPUT_DIR:-${TMPDIR:-/tmp}/LocalFlow-build/release}/LocalFlow.app"

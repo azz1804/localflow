@@ -5,7 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="LocalFlow"
 CONFIGURATION="${1:-release}"
 BUILD_DIR="$ROOT_DIR/.build/$CONFIGURATION"
-APP_DIR="$BUILD_DIR/$APP_NAME.app"
+BUNDLE_OUTPUT_DIR="${LOCALFLOW_BUNDLE_OUTPUT_DIR:-${TMPDIR:-/tmp}/LocalFlow-build/$CONFIGURATION}"
+APP_DIR="$BUNDLE_OUTPUT_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -18,6 +19,7 @@ else
   swift build -c release >&2
 fi
 
+mkdir -p "$BUNDLE_OUTPUT_DIR"
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/$APP_NAME" "$MACOS_DIR/$APP_NAME"

@@ -150,11 +150,33 @@ final class LocalFlowHubModel: ObservableObject {
         }
     }
 
+    func insertHistoryRecord(_ record: DictationRecord) {
+        historyRecords.removeAll { $0.id == record.id }
+        historyRecords.insert(record, at: 0)
+        insights = DictationInsightsCalculator.make(records: historyRecords)
+        selectedHistoryID = record.id
+    }
+
+    func showInsertionOutcome(_ outcome: TextInsertionOutcome) {
+        switch outcome {
+        case .pasted:
+            showStatus("Pasted · saved to History")
+        case .copiedToClipboard:
+            showStatus("No text field selected · copied and saved to History")
+        }
+    }
+
     func saveSettings() {
         var updated = configuration
         updated.openAIAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.historyRetentionDays = max(1, updated.historyRetentionDays)
         updated.pasteRestoreDelayMilliseconds = max(0, updated.pasteRestoreDelayMilliseconds)
+        let validOrbThemeIDs = Set(
+            OrbEvolution.themes.map(\.id) + ["automatic"]
+        )
+        if !validOrbThemeIDs.contains(updated.orbThemeOverride) {
+            updated.orbThemeOverride = "automatic"
+        }
 
         switch saveSettingsHandler?(updated) ?? .success(()) {
         case .success:
@@ -322,6 +344,14 @@ final class SettingsWindowController: NSWindowController {
 
     func selectHistoryTab() {
         model.selectedSection = .history
+    }
+
+    func insertHistoryRecord(_ record: DictationRecord) {
+        model.insertHistoryRecord(record)
+    }
+
+    func showInsertionOutcome(_ outcome: TextInsertionOutcome) {
+        model.showInsertionOutcome(outcome)
     }
 
     func selectHomeTab() {

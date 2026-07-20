@@ -5,7 +5,8 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 ## V1 features
 
 - Native macOS menu bar app.
-- Animated floating recording/processing card driven by the live microphone level.
+- Floating recording card with a display-synced, noise-gated 14-segment live PCM envelope fed by a low-latency hardware render monitor.
+- Shared interactive liquid orb for the dashboard and recording card, with multicolor motion, pointer attraction, and reduced-motion support.
 - Product-style LocalFlow Hub with home, history, word insights, dictionary, settings and diagnostics.
 - Hold-to-talk hotkey: `Fn` first, with `Option+Space` fallback.
 - Toggle hotkey: `Fn+Space`.
@@ -185,7 +186,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 19 unit tests passing.
+- `swift test`: 23 unit tests passing.
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.

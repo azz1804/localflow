@@ -12,6 +12,7 @@ public struct AppConfiguration: Equatable, Sendable {
     public var historyRetentionDays: Int
     public var restoreClipboardAfterPaste: Bool
     public var pasteRestoreDelayMilliseconds: Int
+    public var orbThemeOverride: String
 
     public var isOpenAIConfigured: Bool {
         guard let openAIAPIKey else {
@@ -33,7 +34,8 @@ public struct AppConfiguration: Equatable, Sendable {
         toggleHotkey: String = "fn+space",
         historyRetentionDays: Int = 30,
         restoreClipboardAfterPaste: Bool = true,
-        pasteRestoreDelayMilliseconds: Int = 900
+        pasteRestoreDelayMilliseconds: Int = 900,
+        orbThemeOverride: String = "automatic"
     ) {
         self.openAIAPIKey = openAIAPIKey
         self.transcriptionModel = transcriptionModel
@@ -46,6 +48,7 @@ public struct AppConfiguration: Equatable, Sendable {
         self.historyRetentionDays = historyRetentionDays
         self.restoreClipboardAfterPaste = restoreClipboardAfterPaste
         self.pasteRestoreDelayMilliseconds = pasteRestoreDelayMilliseconds
+        self.orbThemeOverride = orbThemeOverride
     }
 
     public init(env: [String: String]) {
@@ -60,7 +63,8 @@ public struct AppConfiguration: Equatable, Sendable {
             toggleHotkey: env["TOGGLE_HOTKEY"]?.nonEmpty ?? "fn+space",
             historyRetentionDays: Self.intValue(env["HISTORY_RETENTION_DAYS"], default: 30),
             restoreClipboardAfterPaste: Self.boolValue(env["RESTORE_CLIPBOARD_AFTER_PASTE"], default: true),
-            pasteRestoreDelayMilliseconds: Self.intValue(env["PASTE_RESTORE_DELAY_MS"], default: 900)
+            pasteRestoreDelayMilliseconds: Self.intValue(env["PASTE_RESTORE_DELAY_MS"], default: 900),
+            orbThemeOverride: env["ORB_THEME"]?.nonEmpty ?? "automatic"
         )
     }
 
@@ -76,7 +80,8 @@ public struct AppConfiguration: Equatable, Sendable {
             ("TOGGLE_HOTKEY", toggleHotkey),
             ("HISTORY_RETENTION_DAYS", String(historyRetentionDays)),
             ("RESTORE_CLIPBOARD_AFTER_PASTE", restoreClipboardAfterPaste ? "true" : "false"),
-            ("PASTE_RESTORE_DELAY_MS", String(pasteRestoreDelayMilliseconds))
+            ("PASTE_RESTORE_DELAY_MS", String(pasteRestoreDelayMilliseconds)),
+            ("ORB_THEME", orbThemeOverride)
         ]
 
         return values
