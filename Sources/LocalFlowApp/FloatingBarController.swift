@@ -359,6 +359,7 @@ final class FloatingBarView: NSView {
             spectrumContainerLayer.addSublayer(barLayer)
             return barLayer
         }
+        applySpectrumTheme()
     }
 
     private func configureProcessingLayers() {
@@ -737,6 +738,20 @@ final class FloatingBarView: NSView {
             glitterLayer.backgroundColor = color
                 .nsColor()
                 .cgColor
+            glitterLayer.opacity = 0
+        }
+        resetOrbMaterialLayers()
+    }
+
+    private func applySpectrumTheme() {
+        for (layerIndex, barLayer) in spectrumBarLayers.enumerated() {
+            let offsetIndex = layerIndex - (Self.displayedSegmentCount - 1)
+            let normalizedDistance = CGFloat(abs(offsetIndex))
+                / CGFloat(max(1, Self.displayedSegmentCount - 1))
+            barLayer.backgroundColor = barPalette
+                .spectrumColor(at: normalizedDistance)
+                .nsColor()
+                .cgColor
         }
     }
 
@@ -865,6 +880,7 @@ final class FloatingBarView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         applyOrbTheme()
+        applySpectrumTheme()
         applyProcessingTheme()
         CATransaction.commit()
         needsDisplay = true
@@ -1401,10 +1417,7 @@ final class FloatingBarView: NSView {
                 x: rect.midX + CGFloat(offsetIndex) * spacing,
                 y: centerY
             )
-            barLayer.backgroundColor = barPalette
-                .spectrumColor(at: normalizedIndex)
-                .nsColor(alpha: presentation.alpha)
-                .cgColor
+            barLayer.opacity = Float(presentation.alpha)
             barLayer.cornerRadius = min(
                 barWidth / 2,
                 presentation.amplitude
@@ -1441,7 +1454,8 @@ final class FloatingBarView: NSView {
         let motion = LiquidOrbMotion.sample(
             time: phase,
             pointer: pointer,
-            energy: CGFloat(displayedVoiceLevel)
+            energy: CGFloat(displayedVoiceLevel),
+            sparkleCount: orbTheme.material == .galaxy ? 12 : 0
         )
 
         let voiceEnergy = CGFloat(displayedVoiceLevel)
@@ -1493,33 +1507,34 @@ final class FloatingBarView: NSView {
         )
         orbHighlightLayer.startPoint = motion.highlight
 
-        for (index, glitterLayer) in orbGlitterLayers.enumerated() {
-            let sampleIndex = min(
-                motion.sparkles.count - 1,
-                index * 2
+        let visibleSparkleCount = orbTheme.material == .galaxy
+            ? min(
+                orbTheme.sparkleCount,
+                orbGlitterLayers.count
             )
-            let sparkle = motion.sparkles[sampleIndex]
-            let diameter = 0.5 + sparkle.scale * 0.72
-            glitterLayer.bounds = CGRect(
-                x: 0,
-                y: 0,
-                width: diameter,
-                height: diameter
-            )
-            glitterLayer.cornerRadius = diameter / 2
-            glitterLayer.position = CGPoint(
-                x: sparkle.position.x * orbClipLayer.bounds.width,
-                y: sparkle.position.y * orbClipLayer.bounds.height
-            )
-            let visibleSparkleCount = orbTheme.material == .galaxy
-                ? min(
-                    orbTheme.sparkleCount,
-                    orbGlitterLayers.count
+            : 0
+        if visibleSparkleCount > 0, !motion.sparkles.isEmpty {
+            for index in 0..<visibleSparkleCount {
+                let glitterLayer = orbGlitterLayers[index]
+                let sampleIndex = min(
+                    motion.sparkles.count - 1,
+                    index * 2
                 )
-                : 0
-            glitterLayer.opacity = index < visibleSparkleCount
-                ? Float(sparkle.opacity * 0.48)
-                : 0
+                let sparkle = motion.sparkles[sampleIndex]
+                let diameter = 0.5 + sparkle.scale * 0.72
+                glitterLayer.bounds = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: diameter,
+                    height: diameter
+                )
+                glitterLayer.cornerRadius = diameter / 2
+                glitterLayer.position = CGPoint(
+                    x: sparkle.position.x * orbClipLayer.bounds.width,
+                    y: sparkle.position.y * orbClipLayer.bounds.height
+                )
+                glitterLayer.opacity = Float(sparkle.opacity * 0.48)
+            }
         }
 
         let size = orbClipLayer.bounds.size
@@ -1572,7 +1587,6 @@ final class FloatingBarView: NSView {
         in rect: CGRect
     ) {
         orbCausticLayer.isHidden = true
-        resetOrbMaterialLayers()
 
         switch orbTheme.material {
         case .water, .wind, .earth, .aurora, .lava:
@@ -1658,7 +1672,8 @@ final class FloatingBarView: NSView {
         CATransaction.setDisableActions(true)
         let motion = LiquidOrbMotion.sample(
             time: 0,
-            pointer: nil
+            pointer: nil,
+            sparkleCount: orbTheme.material == .galaxy ? 12 : 0
         )
         applyOrbLiquidMotion(motion)
         CATransaction.commit()

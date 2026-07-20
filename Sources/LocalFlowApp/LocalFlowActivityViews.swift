@@ -32,7 +32,8 @@ struct LocalFlowHomeView: View {
 
                 HubRecordingHero(
                     totalWords: model.insights.totalWords,
-                    orbThemeOverride: model.configuration.orbThemeOverride
+                    orbThemeOverride: model.configuration.orbThemeOverride,
+                    isAnimationActive: model.isHubAnimationActive
                 )
 
                 LazyVGrid(columns: columns, spacing: 12) {
@@ -224,6 +225,7 @@ struct LocalFlowHomeView: View {
 private struct HubRecordingHero: View {
     var totalWords: Int
     var orbThemeOverride: String
+    var isAnimationActive: Bool
 
     var body: some View {
         HStack(spacing: 36) {
@@ -278,7 +280,8 @@ private struct HubRecordingHero: View {
 
             HubOrbProgress(
                 totalWords: totalWords,
-                orbThemeOverride: orbThemeOverride
+                orbThemeOverride: orbThemeOverride,
+                isAnimationActive: isAnimationActive
             )
                 .frame(width: 174, height: 170)
         }
@@ -325,6 +328,7 @@ private struct HubRecordingHero: View {
 private struct HubOrbProgress: View {
     var totalWords: Int
     var orbThemeOverride: String
+    var isAnimationActive: Bool
 
     private var progression: OrbProgression {
         OrbEvolution.progression(
@@ -335,7 +339,10 @@ private struct HubOrbProgress: View {
 
     var body: some View {
         VStack(spacing: 3) {
-            ReferenceHubVoiceOrb(theme: progression.theme)
+            ReferenceHubVoiceOrb(
+                theme: progression.theme,
+                isAnimationActive: isAnimationActive
+            )
 
             Text(progression.theme.name)
                 .font(.system(size: 9, weight: .semibold))
@@ -442,85 +449,154 @@ struct OrbHoverInteraction {
     }
 }
 
+struct HubOrbAnimationCadence: Equatable {
+    var minimumInterval: TimeInterval
+    var isPaused: Bool
+    var contourDetail: Int
+
+    static func make(
+        isAnimationActive: Bool,
+        isHovering: Bool,
+        reduceMotion: Bool
+    ) -> HubOrbAnimationCadence {
+        let isPaused = reduceMotion || !isAnimationActive
+        return HubOrbAnimationCadence(
+            minimumInterval: isHovering ? 1 / 60 : 1 / 15,
+            isPaused: isPaused,
+            contourDetail: isHovering ? 96 : 56
+        )
+    }
+}
+
 private struct ReferenceHubVoiceOrb: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverInteraction = OrbHoverInteraction()
+    @State private var isHovering = false
+    @State private var hoverSettleTask: Task<Void, Never>?
 
     var theme: OrbTheme
+    var isAnimationActive: Bool
 
     private let diameter: CGFloat = 136
 
+    @ViewBuilder
     var body: some View {
-        TimelineView(
-            .animation(
-                minimumInterval: 1 / 60,
-                paused: reduceMotion
-            )
-        ) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
-            let motionTime = time * theme.motionSpeed
-            let interactionStrength = reduceMotion
-                ? hoverInteraction.targetStrength
-                : hoverInteraction.strength(at: time)
-            let pointerVelocity = reduceMotion
-                ? CGSize.zero
-                : hoverInteraction.velocity(at: time)
-            let motion = LiquidOrbMotion.sample(
-                time: reduceMotion ? 0 : motionTime,
-                pointer: hoverInteraction.pointer,
-                interactionStrength: interactionStrength,
-                pointerVelocity: pointerVelocity
-            )
-            let breathing = reduceMotion
-                ? 1
-                : 1
-                    + sin(motionTime * 1.18)
-                        * theme.breathingAmplitude * 0.7
-                    + sin(motionTime * 0.47 + 1.3)
-                        * theme.breathingAmplitude * 0.3
-                    + interactionStrength * 0.012
-            let drift = reduceMotion
-                ? CGSize.zero
-                : CGSize(
-                    width: sin(time * 0.42) * 0.9,
-                    height: cos(time * 0.36 + 0.8) * 0.75
-                )
+        let cadence = HubOrbAnimationCadence.make(
+            isAnimationActive: isAnimationActive,
+            isHovering: isHovering,
+            reduceMotion: reduceMotion
+        )
 
-            ReferenceLiquidOrbSurface(
-                motion: motion,
-                theme: theme
-            )
-                .frame(width: diameter, height: diameter)
-                .scaleEffect(breathing)
-                .offset(x: drift.width, y: drift.height)
-                .rotation3DEffect(
-                    .degrees(Double(-motion.tilt.height * 3.2)),
-                    axis: (x: 1, y: 0, z: 0)
-                )
-                .rotation3DEffect(
-                    .degrees(Double(motion.tilt.width * 3.2)),
-                    axis: (x: 0, y: 1, z: 0)
-                )
-                .contentShape(Circle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case let .active(location):
-                        let pointer = CGPoint(
-                            x: max(0, min(1, location.x / diameter)),
-                            y: max(0, min(1, location.y / diameter))
-                        )
-                        hoverInteraction.setActive(
-                            true,
-                            pointer: pointer,
-                            at: Date.timeIntervalSinceReferenceDate
-                        )
-                    case .ended:
-                        hoverInteraction.setActive(
-                            false,
-                            at: Date.timeIntervalSinceReferenceDate
-                        )
-                    }
+        Group {
+            if cadence.isPaused {
+                orb(at: Date(), contourDetail: cadence.contourDetail)
+            } else if isHovering {
+                TimelineView(
+                    .animation(minimumInterval: cadence.minimumInterval)
+                ) { timeline in
+                    orb(
+                        at: timeline.date,
+                        contourDetail: cadence.contourDetail
+                    )
                 }
+            } else {
+                TimelineView(
+                    .periodic(
+                        from: .now,
+                        by: cadence.minimumInterval
+                    )
+                ) { timeline in
+                    orb(
+                        at: timeline.date,
+                        contourDetail: cadence.contourDetail
+                    )
+                }
+            }
+        }
+        .onDisappear {
+            hoverSettleTask?.cancel()
+        }
+    }
+
+    private func orb(
+        at date: Date,
+        contourDetail: Int
+    ) -> some View {
+        let time = date.timeIntervalSinceReferenceDate
+        let motionTime = time * theme.motionSpeed
+        let interactionStrength = reduceMotion
+            ? hoverInteraction.targetStrength
+            : hoverInteraction.strength(at: time)
+        let pointerVelocity = reduceMotion
+            ? CGSize.zero
+            : hoverInteraction.velocity(at: time)
+        let motion = LiquidOrbMotion.sample(
+            time: reduceMotion ? 0 : motionTime,
+            pointer: hoverInteraction.pointer,
+            interactionStrength: interactionStrength,
+            pointerVelocity: pointerVelocity,
+            sparkleCount: theme.material == .galaxy ? 12 : 0
+        )
+        let breathing = reduceMotion
+            ? 1
+            : 1
+                + sin(motionTime * 1.18)
+                    * theme.breathingAmplitude * 0.7
+                + sin(motionTime * 0.47 + 1.3)
+                    * theme.breathingAmplitude * 0.3
+                + interactionStrength * 0.012
+        let drift = reduceMotion
+            ? CGSize.zero
+            : CGSize(
+                width: sin(time * 0.42) * 0.9,
+                height: cos(time * 0.36 + 0.8) * 0.75
+            )
+
+        return ReferenceLiquidOrbSurface(
+            motion: motion,
+            theme: theme,
+            contourDetail: contourDetail
+        )
+        .frame(width: diameter, height: diameter)
+        .scaleEffect(breathing)
+        .offset(x: drift.width, y: drift.height)
+        .rotation3DEffect(
+            .degrees(Double(-motion.tilt.height * 3.2)),
+            axis: (x: 1, y: 0, z: 0)
+        )
+        .rotation3DEffect(
+            .degrees(Double(motion.tilt.width * 3.2)),
+            axis: (x: 0, y: 1, z: 0)
+        )
+        .contentShape(Circle())
+        .onContinuousHover { phase in
+            switch phase {
+            case let .active(location):
+                hoverSettleTask?.cancel()
+                isHovering = true
+                let pointer = CGPoint(
+                    x: max(0, min(1, location.x / diameter)),
+                    y: max(0, min(1, location.y / diameter))
+                )
+                hoverInteraction.setActive(
+                    true,
+                    pointer: pointer,
+                    at: Date.timeIntervalSinceReferenceDate
+                )
+            case .ended:
+                hoverInteraction.setActive(
+                    false,
+                    at: Date.timeIntervalSinceReferenceDate
+                )
+                hoverSettleTask?.cancel()
+                hoverSettleTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(320))
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    isHovering = false
+                }
+            }
         }
     }
 }
@@ -528,6 +604,7 @@ private struct ReferenceHubVoiceOrb: View {
 private struct ReferenceLiquidOrbSurface: View {
     var motion: LiquidOrbMotionSample
     var theme: OrbTheme
+    var contourDetail: Int
 
     var body: some View {
         Canvas(
@@ -549,7 +626,7 @@ private struct ReferenceLiquidOrbSurface: View {
             LiquidOrbGeometry.blobPath(
                 in: orbRect,
                 motion: motion,
-                detail: 96
+                detail: contourDetail
             )
         )
         let cursorOffset = CGPoint(
@@ -1669,495 +1746,6 @@ private struct ReferenceLiquidOrbSurface: View {
             x: rect.minX + normalizedPoint.x * rect.width,
             y: rect.minY + normalizedPoint.y * rect.height
         )
-    }
-}
-
-private struct HubVoiceOrb: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pointerLocation: CGPoint?
-
-    private let diameter: CGFloat = 112
-
-    var body: some View {
-        TimelineView(
-            .animation(
-                minimumInterval: pointerLocation == nil ? 1 / 15 : 1 / 60,
-                paused: reduceMotion
-            )
-        ) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
-            let motion = LiquidOrbMotion.sample(
-                time: reduceMotion ? 0 : time,
-                pointer: pointerLocation
-            )
-            let breathing = reduceMotion
-                ? 1
-                : 1
-                    + sin(time * 1.45) * 0.014
-                    + motion.interactionStrength * 0.022
-
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.3, green: 0.56, blue: 1)
-                                    .opacity(0.32),
-                                Color(red: 0.62, green: 0.28, blue: 1)
-                                    .opacity(0.16),
-                                .clear
-                            ],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: 76
-                        )
-                    )
-                    .blur(radius: 13)
-                    .scaleEffect(breathing * 1.12)
-
-                ZStack {
-                    Circle()
-                        .fill(
-                            AngularGradient(
-                                colors: [
-                                    Color(red: 0.025, green: 0.055, blue: 0.19),
-                                    Color(red: 0.12, green: 0.16, blue: 0.48),
-                                    Color(red: 0.34, green: 0.12, blue: 0.52),
-                                    Color(red: 0.08, green: 0.29, blue: 0.46),
-                                    Color(red: 0.025, green: 0.055, blue: 0.19)
-                                ],
-                                center: .center,
-                                angle: .degrees(motion.flowAngle)
-                            )
-                        )
-
-                    HubLiquidBlob(
-                        color: Color(red: 0.03, green: 0.76, blue: 1),
-                        center: motion.cyan,
-                        size: CGSize(width: 94, height: 72),
-                        opacity: 0.78,
-                        rotation: motion.flowAngle * 0.7
-                    )
-                    HubLiquidBlob(
-                        color: Color(red: 0.43, green: 0.25, blue: 1),
-                        center: motion.violet,
-                        size: CGSize(width: 104, height: 84),
-                        opacity: 0.82,
-                        rotation: -motion.flowAngle * 0.48
-                    )
-                    HubLiquidBlob(
-                        color: Color(red: 0.96, green: 0.16, blue: 0.73),
-                        center: motion.magenta,
-                        size: CGSize(width: 74, height: 58),
-                        opacity: 0.68,
-                        rotation: motion.flowAngle * 0.9 + 18
-                    )
-                    HubLiquidBlob(
-                        color: Color(red: 1, green: 0.58, blue: 0.12),
-                        center: motion.gold,
-                        size: CGSize(width: 56, height: 42),
-                        opacity: 0.5,
-                        rotation: -motion.flowAngle * 0.76
-                    )
-
-                    HubLiquidMembrane(
-                        time: reduceMotion ? 0 : time,
-                        motion: motion
-                    )
-
-                    HubLiquidBlob(
-                        color: Color(red: 0.74, green: 0.9, blue: 1),
-                        center: motion.pearl,
-                        size: CGSize(width: 42, height: 30),
-                        opacity: 0.3,
-                        rotation: motion.flowAngle
-                    )
-
-                    HubLiquidCaustics(
-                        time: reduceMotion ? 0 : time,
-                        motion: motion
-                    )
-
-                    HubLiquidGlitter(motion: motion)
-                }
-                .clipShape(Circle())
-                .scaleEffect(breathing)
-                .compositingGroup()
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                .white.opacity(0.52),
-                                Color(red: 0.62, green: 0.88, blue: 1)
-                                    .opacity(0.1),
-                                .clear
-                            ],
-                            center: UnitPoint(
-                                x: motion.highlight.x,
-                                y: motion.highlight.y
-                            ),
-                            startRadius: 0,
-                            endRadius: 68
-                        )
-                    )
-                    .blendMode(.screen)
-
-                Circle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.52),
-                                .white.opacity(0.07),
-                                Color(red: 0.5, green: 0.42, blue: 1)
-                                    .opacity(0.34)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.8
-                    )
-                    .padding(1)
-            }
-            .frame(width: diameter, height: diameter)
-            .scaleEffect(breathing)
-            .rotation3DEffect(
-                .degrees(Double(-motion.tilt.height * 5)),
-                axis: (x: 1, y: 0, z: 0)
-            )
-            .rotation3DEffect(
-                .degrees(Double(motion.tilt.width * 5)),
-                axis: (x: 0, y: 1, z: 0)
-            )
-            .shadow(
-                color: Color(red: 0.38, green: 0.38, blue: 1)
-                    .opacity(0.22),
-                radius: 20,
-                y: 8
-            )
-            .contentShape(Circle())
-            .onContinuousHover { phase in
-                switch phase {
-                case let .active(location):
-                    pointerLocation = CGPoint(
-                        x: max(0, min(1, location.x / diameter)),
-                        y: max(0, min(1, location.y / diameter))
-                    )
-                case .ended:
-                    pointerLocation = nil
-                }
-            }
-        }
-    }
-}
-
-private struct HubLiquidBlob: View {
-    var color: Color
-    var center: CGPoint
-    var size: CGSize
-    var opacity: Double
-    var rotation: CGFloat
-
-    var body: some View {
-        Ellipse()
-            .fill(
-                RadialGradient(
-                    colors: [
-                        color.opacity(opacity),
-                        color.opacity(opacity * 0.44),
-                        .clear
-                    ],
-                    center: .center,
-                    startRadius: 0,
-                    endRadius: max(size.width, size.height) / 2
-                )
-            )
-            .frame(width: size.width, height: size.height)
-            .position(
-                x: center.x * 112,
-                y: center.y * 112
-            )
-            .rotationEffect(.degrees(rotation))
-            .blur(radius: 4.8)
-            .blendMode(.plusLighter)
-    }
-}
-
-private struct HubLiquidMembrane: View {
-    var time: TimeInterval
-    var motion: LiquidOrbMotionSample
-
-    var body: some View {
-        Canvas(
-            opaque: false,
-            colorMode: .extendedLinear,
-            rendersAsynchronously: true
-        ) { context, size in
-            let path = membranePath(in: size)
-            let start = CGPoint(
-                x: motion.oil.x * size.width - size.width * 0.2,
-                y: motion.oil.y * size.height - size.height * 0.18
-            )
-            let end = CGPoint(
-                x: motion.oil.x * size.width + size.width * 0.23,
-                y: motion.oil.y * size.height + size.height * 0.21
-            )
-
-            context.drawLayer { liquid in
-                liquid.addFilter(.blur(radius: 0.9))
-                liquid.fill(
-                    path,
-                    with: .linearGradient(
-                        Gradient(colors: [
-                            Color(red: 0.015, green: 0.03, blue: 0.12)
-                                .opacity(0.86),
-                            Color(red: 0.18, green: 0.07, blue: 0.34)
-                                .opacity(0.82),
-                            Color(red: 0.68, green: 0.14, blue: 0.68)
-                                .opacity(0.56),
-                            Color(red: 0.04, green: 0.7, blue: 0.94)
-                                .opacity(0.48)
-                        ]),
-                        startPoint: start,
-                        endPoint: end
-                    )
-                )
-            }
-
-            context.stroke(
-                path,
-                with: .linearGradient(
-                    Gradient(colors: [
-                        .white.opacity(0.3),
-                        Color(red: 0.28, green: 0.88, blue: 1)
-                            .opacity(0.36),
-                        Color(red: 1, green: 0.36, blue: 0.72)
-                            .opacity(0.28),
-                        .white.opacity(0.08)
-                    ]),
-                    startPoint: CGPoint(x: 0, y: 0),
-                    endPoint: CGPoint(x: size.width, y: size.height)
-                ),
-                lineWidth: 0.8
-            )
-        }
-        .blendMode(.screen)
-    }
-
-    private func membranePath(in size: CGSize) -> Path {
-        let center = CGPoint(
-            x: motion.oil.x * size.width,
-            y: motion.oil.y * size.height
-        )
-        let baseRadius = size.width * (
-            0.205 + motion.turbulence * 0.025
-        )
-        let steps = 32
-        var points: [CGPoint] = []
-
-        for index in 0..<steps {
-            let progress = CGFloat(index) / CGFloat(steps)
-            let angle = progress * .pi * 2
-            let firstLobe = CGFloat(
-                sin(Double(angle) * 3 + time * 0.74)
-            ) * (0.11 + motion.turbulence * 0.035)
-            let secondLobe = CGFloat(
-                cos(Double(angle) * 5 - time * 0.46)
-            ) * 0.055
-            let radius = baseRadius * (1 + firstLobe + secondLobe)
-            points.append(
-                CGPoint(
-                    x: center.x + cos(angle) * radius * 1.16,
-                    y: center.y + sin(angle) * radius * 0.84
-                )
-            )
-        }
-
-        var path = Path()
-        guard let first = points.first,
-              let last = points.last else {
-            return path
-        }
-        path.move(to: midpoint(last, first))
-
-        for index in points.indices {
-            let point = points[index]
-            let next = points[(index + 1) % points.count]
-            path.addQuadCurve(
-                to: midpoint(point, next),
-                control: point
-            )
-        }
-        path.closeSubpath()
-        return path
-    }
-
-    private func midpoint(_ first: CGPoint, _ second: CGPoint) -> CGPoint {
-        CGPoint(
-            x: (first.x + second.x) / 2,
-            y: (first.y + second.y) / 2
-        )
-    }
-}
-
-private struct HubLiquidGlitter: View {
-    var motion: LiquidOrbMotionSample
-
-    var body: some View {
-        Canvas(
-            opaque: false,
-            colorMode: .extendedLinear,
-            rendersAsynchronously: true
-        ) { context, size in
-            context.drawLayer { glow in
-                glow.addFilter(.blur(radius: 1.1))
-                drawParticles(
-                    in: &glow,
-                    size: size,
-                    opacityScale: 0.55,
-                    sizeScale: 1.7
-                )
-            }
-            drawParticles(
-                in: &context,
-                size: size,
-                opacityScale: 1,
-                sizeScale: 1
-            )
-        }
-        .blendMode(.screen)
-    }
-
-    private func drawParticles(
-        in context: inout GraphicsContext,
-        size: CGSize,
-        opacityScale: CGFloat,
-        sizeScale: CGFloat
-    ) {
-        for sparkle in motion.sparkles {
-            let diameter = (0.75 + sparkle.scale * 0.9) * sizeScale
-            let rect = CGRect(
-                x: sparkle.position.x * size.width - diameter / 2,
-                y: sparkle.position.y * size.height - diameter / 2,
-                width: diameter,
-                height: diameter
-            )
-            let color = Color(
-                red: 0.68 + sparkle.warmth * 0.3,
-                green: 0.86 - sparkle.warmth * 0.14,
-                blue: 1 - sparkle.warmth * 0.26
-            )
-            context.fill(
-                Path(ellipseIn: rect),
-                with: .color(
-                    color.opacity(
-                        Double(sparkle.opacity * opacityScale)
-                    )
-                )
-            )
-        }
-    }
-}
-
-private struct HubLiquidCaustics: View {
-    var time: TimeInterval
-    var motion: LiquidOrbMotionSample
-
-    var body: some View {
-        Canvas(
-            opaque: false,
-            colorMode: .extendedLinear,
-            rendersAsynchronously: true
-        ) { context, size in
-            context.addFilter(.blur(radius: 0.7))
-
-            let tilt = motion.tilt.height * size.height * 0.09
-            let wobble = CGFloat(sin(time * 2.7))
-                * (2.2 + motion.interactionStrength * 1.8)
-            let firstY = size.height * 0.48 + tilt + wobble
-
-            var firstWave = Path()
-            firstWave.move(to: CGPoint(x: -8, y: firstY))
-            firstWave.addCurve(
-                to: CGPoint(
-                    x: size.width + 4,
-                    y: firstY - 7 - wobble * 0.4
-                ),
-                control1: CGPoint(
-                    x: size.width * 0.28,
-                    y: firstY - 10 - wobble
-                ),
-                control2: CGPoint(
-                    x: size.width * 0.7,
-                    y: firstY + 6 + wobble
-                )
-            )
-            context.stroke(
-                firstWave,
-                with: .color(.white.opacity(0.2)),
-                lineWidth: 0.85
-            )
-
-            let secondY = size.height * 0.62 - tilt * 0.7
-                + CGFloat(cos(time * 2.1)) * 2
-            var secondWave = Path()
-            secondWave.move(
-                to: CGPoint(x: size.width * 0.08, y: secondY + 4)
-            )
-            secondWave.addCurve(
-                to: CGPoint(
-                    x: size.width * 0.88,
-                    y: secondY - 5
-                ),
-                control1: CGPoint(
-                    x: size.width * 0.34,
-                    y: secondY + 8
-                ),
-                control2: CGPoint(
-                    x: size.width * 0.64,
-                    y: secondY - 7
-                )
-            )
-            context.stroke(
-                secondWave,
-                with: .color(
-                    Color(red: 0.72, green: 0.9, blue: 1)
-                        .opacity(0.12)
-                ),
-                lineWidth: 0.7
-            )
-
-            let thirdY = size.height * 0.34
-                + motion.tilt.width * size.width * 0.06
-                + CGFloat(sin(time * 1.76 + 1.4)) * 1.8
-            var thirdWave = Path()
-            thirdWave.move(
-                to: CGPoint(x: size.width * 0.18, y: thirdY - 3)
-            )
-            thirdWave.addCurve(
-                to: CGPoint(
-                    x: size.width * 0.78,
-                    y: thirdY + 5
-                ),
-                control1: CGPoint(
-                    x: size.width * 0.36,
-                    y: thirdY - 7
-                ),
-                control2: CGPoint(
-                    x: size.width * 0.6,
-                    y: thirdY + 7
-                )
-            )
-            context.stroke(
-                thirdWave,
-                with: .color(
-                    Color(red: 1, green: 0.72, blue: 0.92)
-                        .opacity(0.1)
-                ),
-                lineWidth: 0.55
-            )
-        }
-        .blendMode(.plusLighter)
     }
 }
 

@@ -194,6 +194,7 @@ enum LocalFlowUIPreviewRenderer {
 
     private static func makeModel() -> LocalFlowHubModel {
         let model = LocalFlowHubModel()
+        model.isHubAnimationActive = true
         let now = Date()
         let sampleTexts = [
             "Can you prepare a clean summary of the product changes and the remaining launch risks?",

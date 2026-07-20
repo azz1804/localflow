@@ -229,4 +229,38 @@ final class LiquidOrbMotionTests: XCTestCase {
         XCTAssertGreaterThan(interactiveBounds.minX, rect.minX)
         XCTAssertLessThan(interactiveBounds.maxX, rect.maxX)
     }
+
+    func testSparkleGenerationCanBeSkippedForNonGalaxyThemes() {
+        let sample = LiquidOrbMotion.sample(
+            time: 2.4,
+            pointer: nil,
+            sparkleCount: 0
+        )
+
+        XCTAssertTrue(sample.sparkles.isEmpty)
+    }
+
+    func testDashboardOrbPausesInBackgroundAndBoostsOnHover() {
+        let background = HubOrbAnimationCadence.make(
+            isAnimationActive: false,
+            isHovering: false,
+            reduceMotion: false
+        )
+        let ambient = HubOrbAnimationCadence.make(
+            isAnimationActive: true,
+            isHovering: false,
+            reduceMotion: false
+        )
+        let interactive = HubOrbAnimationCadence.make(
+            isAnimationActive: true,
+            isHovering: true,
+            reduceMotion: false
+        )
+
+        XCTAssertTrue(background.isPaused)
+        XCTAssertFalse(ambient.isPaused)
+        XCTAssertEqual(ambient.minimumInterval, 1 / 15)
+        XCTAssertEqual(interactive.minimumInterval, 1 / 60)
+        XCTAssertLessThan(ambient.contourDetail, interactive.contourDetail)
+    }
 }

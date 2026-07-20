@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import LocalFlowCore
+import ServiceManagement
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -31,11 +32,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try loadRuntimeConfiguration()
             LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
             setupMenuBar()
+            configureLaunchAtLogin()
             setupControllers()
             refreshPermissionMenuState()
             showMainWindow()
         } catch {
             setupMenuBar()
+            configureLaunchAtLogin()
             showFatalError(error)
         }
     }
@@ -43,6 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         accessibilityRetryTimer?.invalidate()
         hotkeyController?.stop()
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        showMainWindow()
+        return true
     }
 
     private func loadRuntimeConfiguration() throws {
@@ -162,18 +173,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupMenuBar() {
-        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-           let icon = NSImage(contentsOf: iconURL) {
-            icon.size = NSSize(width: 18, height: 18)
+        let statusItem = NSStatusBar.system.statusItem(
+            withLength: NSStatusItem.squareLength
+        )
+        statusItem.autosaveName = "LocalFlow.StatusItem"
+        statusItem.behavior = []
+        statusItem.isVisible = true
+
+        if let icon = NSImage(
+            systemSymbolName: "waveform.circle.fill",
+            accessibilityDescription: "LocalFlow"
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(
+                pointSize: 16,
+                weight: .semibold
+            )
+            .applying(
+                NSImage.SymbolConfiguration(
+                    paletteColors: [
+                        .white,
+                        NSColor(
+                            calibratedRed: 0.42,
+                            green: 0.3,
+                            blue: 0.96,
+                            alpha: 1
+                        )
+                    ]
+                )
+            )
+        ) {
             icon.isTemplate = false
             statusItem.button?.image = icon
+            statusItem.button?.imagePosition = .imageOnly
+            statusItem.button?.imageScaling = .scaleProportionallyDown
         } else {
             statusItem.button?.title = "LF"
         }
         statusItem.button?.toolTip = "LocalFlow"
+        statusItem.button?.setAccessibilityLabel("LocalFlow menu")
 
         let menu = NSMenu()
+        let settingsItem = NSMenuItem(
+            title: "Open LocalFlow",
+            action: #selector(showMainWindow),
+            keyEquivalent: ""
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
         startStopMenuItem.target = self
         menu.addItem(startStopMenuItem)
 
@@ -183,18 +232,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Open LocalFlow", action: #selector(showMainWindow), keyEquivalent: "")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
-        menu.addItem(.separator())
-
         let quitItem = NSMenuItem(title: "Quit LocalFlow", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
         statusItem.menu = menu
         self.statusItem = statusItem
+    }
+
+    private func configureLaunchAtLogin() {
+        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
+            return
+        }
+
+        let service = SMAppService.mainApp
+        LocalFlowLogger.log(
+            "Launch at login status=\(String(describing: service.status))"
+        )
+        guard service.status != .enabled,
+              service.status != .requiresApproval else {
+            return
+        }
+
+        do {
+            try service.register()
+            LocalFlowLogger.log("Launch at login registered")
+        } catch {
+            LocalFlowLogger.log(
+                "Launch at login registration failed: \(error.localizedDescription)"
+            )
+        }
     }
 
     private func updateMenu(for status: AppStatus) {
@@ -449,6 +516,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureSettingsWindowCallbacks(_ controller: SettingsWindowController) {
+        controller.onWindowClosed = { [weak self, weak controller] in
+            guard let self,
+                  self.settingsWindowController === controller else {
+                return
+            }
+            self.settingsWindowController = nil
+        }
         controller.onSaveSettings = { [weak self] updatedConfiguration in
             guard let self else {
                 return .success(())

@@ -71,6 +71,7 @@ struct LocalFlowHistoryGroup: Identifiable {
 @MainActor
 final class LocalFlowHubModel: ObservableObject {
     @Published var selectedSection: LocalFlowHubSection = .home
+    @Published var isHubAnimationActive = false
     @Published var configuration = AppConfiguration()
     @Published var apiKey = ""
     @Published var historyRecords: [DictationRecord] = []
@@ -292,6 +293,7 @@ final class SettingsWindowController: NSWindowController {
     var onOpenSupportFolder: (() -> Void)?
     var onOpenDiagnosticLog: (() -> Void)?
     var onRetryHotkeys: (() -> Void)?
+    var onWindowClosed: (() -> Void)?
 
     private let model: LocalFlowHubModel
 
@@ -317,11 +319,17 @@ final class SettingsWindowController: NSWindowController {
         window.center()
 
         super.init(window: window)
+        window.delegate = self
         configureModelActions()
+        configureAppActivityObservers()
     }
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     func update(
@@ -386,6 +394,57 @@ final class SettingsWindowController: NSWindowController {
         model.retryHotkeysHandler = { [weak self] in
             self?.onRetryHotkeys?()
         }
+    }
+
+    private func configureAppActivityObservers() {
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(applicationActivityDidChange(_:)),
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+        center.addObserver(
+            self,
+            selector: #selector(applicationActivityDidChange(_:)),
+            name: NSApplication.didResignActiveNotification,
+            object: NSApp
+        )
+    }
+
+    @objc
+    private func applicationActivityDidChange(_ notification: Notification) {
+        refreshHubAnimationActivity()
+    }
+
+    private func refreshHubAnimationActivity() {
+        model.isHubAnimationActive = NSApp.isActive
+            && window?.isVisible == true
+            && window?.isMiniaturized == false
+            && window?.isKeyWindow == true
+    }
+}
+
+extension SettingsWindowController: NSWindowDelegate {
+    func windowDidBecomeKey(_ notification: Notification) {
+        refreshHubAnimationActivity()
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        refreshHubAnimationActivity()
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        model.isHubAnimationActive = false
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        refreshHubAnimationActivity()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        model.isHubAnimationActive = false
+        onWindowClosed?()
     }
 }
 

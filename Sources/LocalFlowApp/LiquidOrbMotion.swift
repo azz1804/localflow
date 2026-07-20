@@ -34,7 +34,8 @@ enum LiquidOrbMotion {
         pointer: CGPoint?,
         energy: CGFloat = 0,
         interactionStrength explicitInteractionStrength: CGFloat? = nil,
-        pointerVelocity: CGSize = .zero
+        pointerVelocity: CGSize = .zero,
+        sparkleCount: Int = 12
     ) -> LiquidOrbMotionSample {
         let clampedEnergy = max(0, min(1, energy))
         let pointer = pointer.map {
@@ -103,7 +104,7 @@ enum LiquidOrbMotion {
             )
         }
 
-        let sparkles = (0..<12).map { index in
+        let sparkles = (0..<max(0, min(12, sparkleCount))).map { index in
             let value = Double(index)
             let baseX = fractionalPart(0.17 + value * 0.618_033_988_75)
             let baseY = fractionalPart(0.31 + value * 0.414_213_562_37)
