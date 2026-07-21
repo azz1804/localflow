@@ -28,6 +28,7 @@ final class DictationController {
     private var isStarting = false
     private var isProcessing = false
     private var shouldStopWhenStarted = false
+    private var shouldCancelWhenStarted = false
     private var recordingMode: RecordingMode = .hold
 
     init(
@@ -97,6 +98,17 @@ final class DictationController {
         }
     }
 
+    func cancelRecording() {
+        if isStarting {
+            shouldCancelWhenStarted = true
+            shouldStopWhenStarted = false
+            LocalFlowLogger.log("Recording cancel queued while recorder is starting")
+            return
+        }
+
+        cancelActiveRecording()
+    }
+
     func lockCurrentHoldRecording() {
         guard recordingMode == .hold else {
             return
@@ -147,6 +159,7 @@ final class DictationController {
 
         isStarting = true
         shouldStopWhenStarted = false
+        shouldCancelWhenStarted = false
         recordingMode = mode
         setStatus(.recording(0, recordingMode))
 
@@ -158,6 +171,13 @@ final class DictationController {
             recordingStartedAt = Date()
             isStarting = false
             LocalFlowLogger.log("Recording started")
+
+            if shouldCancelWhenStarted {
+                shouldCancelWhenStarted = false
+                LocalFlowLogger.log("Recording cancelling immediately after delayed start")
+                cancelActiveRecording()
+                return
+            }
 
             if shouldStopWhenStarted {
                 shouldStopWhenStarted = false
@@ -171,9 +191,37 @@ final class DictationController {
         } catch {
             isStarting = false
             shouldStopWhenStarted = false
+            shouldCancelWhenStarted = false
             recordingTargetApplication = nil
             recordingInsertionTarget = nil
             LocalFlowLogger.log("Recording start failed error=\(error.localizedDescription)")
+            setStatus(.error(error.localizedDescription))
+        }
+    }
+
+    private func cancelActiveRecording() {
+        recordingFrameDriver?.stop()
+        recordingFrameDriver = nil
+
+        guard audioRecorder.isRecording else {
+            resetRecordingState()
+            setStatus(.idle)
+            return
+        }
+
+        do {
+            let result = try audioRecorder.stop()
+            removeTemporaryFile(result.fileURL)
+            LocalFlowLogger.log(
+                "Recording cancelled duration=\(String(format: "%.2f", result.durationSeconds))"
+            )
+            resetRecordingState()
+            setStatus(.idle)
+        } catch {
+            resetRecordingState()
+            LocalFlowLogger.log(
+                "Recording cancel failed error=\(error.localizedDescription)"
+            )
             setStatus(.error(error.localizedDescription))
         }
     }
@@ -242,13 +290,31 @@ final class DictationController {
         )
 
         do {
+            let optimizedUpload = await AudioUploadOptimizer.prepare(
+                result.fileURL
+            )
+            defer {
+                if optimizedUpload.fileURL.standardizedFileURL
+                    != result.fileURL.standardizedFileURL {
+                    removeTemporaryFile(optimizedUpload.fileURL)
+                }
+            }
+            LocalFlowLogger.log(
+                "Audio upload prepared originalBytes=\(optimizedUpload.originalByteCount) uploadBytes=\(optimizedUpload.uploadByteCount) durationMs=\(Int((optimizedUpload.preparationDuration * 1_000).rounded()))"
+            )
+
+            let inferenceStartedAt = ProcessInfo.processInfo.systemUptime
             let transcribedText = try await openAIClient.transcribeAudio(
-                fileURL: result.fileURL,
+                fileURL: optimizedUpload.fileURL,
                 model: configuration.transcriptionModel,
                 language: configuration.transcriptionLanguage,
                 prompt: transcriptionPrompt
             )
-            LocalFlowLogger.log("Transcription finished chars=\(transcribedText.count)")
+            let inferenceDuration = ProcessInfo.processInfo.systemUptime
+                - inferenceStartedAt
+            LocalFlowLogger.log(
+                "Transcription finished chars=\(transcribedText.count) durationMs=\(Int((inferenceDuration * 1_000).rounded())) model=\(configuration.transcriptionModel)"
+            )
 
             var finalText = ReplacementEngine.apply(dictionary.replacements, to: transcribedText)
             var polished = false
@@ -326,6 +392,15 @@ final class DictationController {
     ) {
         self.status = status
         onStatusChanged?(status, visualization)
+    }
+
+    private func resetRecordingState() {
+        shouldStopWhenStarted = false
+        shouldCancelWhenStarted = false
+        recordingTargetApplication = nil
+        recordingInsertionTarget = nil
+        recordingStartedAt = nil
+        recordingMode = .hold
     }
 
     private func removeTemporaryFile(_ url: URL) {

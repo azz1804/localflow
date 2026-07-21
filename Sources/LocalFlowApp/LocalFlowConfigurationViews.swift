@@ -187,7 +187,7 @@ struct LocalFlowSettingsView: View {
                         label: "Transcription model",
                         help: "OpenAI audio transcription model."
                     ) {
-                        TextField("gpt-4o-transcribe", text: $model.configuration.transcriptionModel)
+                        TextField("gpt-4o-mini-transcribe", text: $model.configuration.transcriptionModel)
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 260)
                     }
@@ -255,8 +255,8 @@ struct LocalFlowSettingsView: View {
                     }
 
                     HubSettingRow(
-                        label: "Finish recording",
-                        help: "Stops hands-free recording, then transcribes and pastes."
+                        label: "Cancel recording",
+                        help: "Discards the current recording without transcribing or pasting."
                     ) {
                         Text("Escape")
                             .font(.system(size: 11, weight: .semibold))

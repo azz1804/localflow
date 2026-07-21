@@ -25,7 +25,7 @@ public struct AppConfiguration: Equatable, Sendable {
 
     public init(
         openAIAPIKey: String? = nil,
-        transcriptionModel: String = "gpt-4o-transcribe",
+        transcriptionModel: String = "gpt-4o-mini-transcribe",
         transcriptionLanguage: String = "fr",
         enablePolish: Bool = false,
         polishModel: String = "gpt-4o-mini",
@@ -54,7 +54,7 @@ public struct AppConfiguration: Equatable, Sendable {
     public init(env: [String: String]) {
         self.init(
             openAIAPIKey: env["OPENAI_API_KEY"],
-            transcriptionModel: env["TRANSCRIPTION_MODEL"]?.nonEmpty ?? "gpt-4o-transcribe",
+            transcriptionModel: env["TRANSCRIPTION_MODEL"]?.nonEmpty ?? "gpt-4o-mini-transcribe",
             transcriptionLanguage: env["TRANSCRIPTION_LANGUAGE"]?.nonEmpty ?? "fr",
             enablePolish: Self.boolValue(env["ENABLE_POLISH"], default: false),
             polishModel: env["POLISH_MODEL"]?.nonEmpty ?? "gpt-4o-mini",

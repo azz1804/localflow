@@ -270,7 +270,7 @@ private struct HubRecordingHero: View {
                         .frame(width: 3, height: 3)
 
                     HubKeycap("esc")
-                    Text("finish")
+                    Text("cancel")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.38))
                 }

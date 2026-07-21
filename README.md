@@ -10,7 +10,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - Product-style LocalFlow Hub with home, history, word insights, dictionary, settings and diagnostics.
 - Hold-to-talk hotkey: `Fn` first, with `Option+Space` fallback.
 - Toggle hotkey: `Fn+Space`.
-- `Escape` finishes an active toggle recording and starts transcription.
+- `Escape` cancels the active recording without transcribing or pasting it.
 - Local temporary audio recording, deleted after transcription.
 - OpenAI transcription with French defaults and mixed English vocabulary support.
 - Optional OpenAI polish pass, disabled by default.
@@ -30,7 +30,7 @@ Prerequisites:
 Clone the repository, then create a local `.env` file:
 
 ```bash
-git clone <repo-url> LocalFlow
+git clone https://github.com/azz1804/localflow.git LocalFlow
 cd LocalFlow
 cp .env.example .env
 ```
@@ -106,7 +106,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
-- Press `Escape` to stop an active toggle recording and transcribe/paste it.
+- Press `Escape` to discard the active recording without transcribing or pasting it.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
@@ -186,7 +186,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 23 unit tests passing.
+- `swift test`: 68 unit tests passing.
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.
@@ -204,3 +204,7 @@ Live transcription requires a valid `OPENAI_API_KEY` in `~/Library/Application S
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
 - If macOS shows LocalFlow as enabled but LocalFlow still reports missing permission, remove the old LocalFlow entry from that permission pane, run `./Scripts/install_app.sh`, and add `/Applications/LocalFlow.app` again.
 - Diagnostics are written to `~/Library/Application Support/LocalFlow/localflow.log`.
+
+## Attribution
+
+LocalFlow began as a derivative of [gregoiregllt/localflow](https://github.com/gregoiregllt/localflow) and has since been substantially redesigned and extended. It remains available under the Apache License 2.0; see [LICENSE](LICENSE).

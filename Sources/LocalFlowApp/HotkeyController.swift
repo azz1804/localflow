@@ -237,6 +237,7 @@ final class HotkeyController {
     var onHoldEnd: (() -> Void)?
     var onHoldLocked: (() -> Void)?
     var onToggle: (() -> Void)?
+    var onCancel: (() -> Void)?
     var onDiagnosticEvent: ((String) -> Void)?
 
     private let holdSpec: HotkeySpec?
@@ -259,6 +260,7 @@ final class HotkeyController {
     private var pendingFnReleaseTask: Task<Void, Never>?
     private var togglePressGate = HotkeyPressGate()
     private var toggleRecordingIsActive = false
+    private var applicationRecordingIsActive = false
     private var lastToggleTime: CFTimeInterval = 0
     private(set) var isRunning = false
     private(set) var activeTapDescription = "none"
@@ -381,11 +383,17 @@ final class HotkeyController {
         cancelPendingFnRelease()
         togglePressGate.end()
         toggleRecordingIsActive = false
+        applicationRecordingIsActive = false
         lastToggleTime = 0
+    }
+
+    func setApplicationRecordingActive(_ isActive: Bool) {
+        applicationRecordingIsActive = isActive
     }
 
     func clearToggleRecordingState() {
         toggleRecordingIsActive = false
+        applicationRecordingIsActive = false
         activeHoldSource = nil
         cancelPendingHoldStart()
     }
@@ -619,11 +627,11 @@ final class HotkeyController {
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
 
-        if Self.shouldStopToggleRecordingWithEscape(
+        if Self.shouldCancelRecordingWithEscape(
             keyCode: keyCode,
             isRepeat: isRepeat,
-            toggleRecordingIsActive: toggleRecordingIsActive
-        ), stopToggleRecordingWithEscape(source: "escape-cg-key") {
+            recordingIsActive: escapeCanCancelRecording
+        ), cancelRecordingWithEscape(source: "escape-cg-key") {
             return nil
         }
 
@@ -721,12 +729,12 @@ final class HotkeyController {
             return false
         }
 
-        if Self.shouldStopToggleRecordingWithEscape(
+        if Self.shouldCancelRecordingWithEscape(
             keyCode: snapshot.keyCode,
             isRepeat: snapshot.isRepeat,
-            toggleRecordingIsActive: toggleRecordingIsActive
+            recordingIsActive: escapeCanCancelRecording
         ),
-           stopToggleRecordingWithEscape(source: "escape-nsevent-key") {
+           cancelRecordingWithEscape(source: "escape-nsevent-key") {
             return true
         }
 
@@ -912,23 +920,34 @@ final class HotkeyController {
         onHoldLocked?()
     }
 
-    private func stopToggleRecordingWithEscape(source: String) -> Bool {
-        guard toggleRecordingIsActive else {
+    private var escapeCanCancelRecording: Bool {
+        applicationRecordingIsActive
+            || toggleRecordingIsActive
+            || activeHoldSource != nil
+            || pendingHoldTask != nil
+    }
+
+    private func cancelRecordingWithEscape(source: String) -> Bool {
+        guard escapeCanCancelRecording else {
             return false
         }
 
+        toggleRecordingIsActive = false
         activeHoldSource = nil
         cancelPendingHoldStart()
-        triggerToggleIfNeeded(source: source)
+        cancelPendingFnRelease()
+        LocalFlowLogger.log("Hotkey cancel source=\(source)")
+        onDiagnosticEvent?("cancel: \(Self.displayName(for: source))")
+        onCancel?()
         return true
     }
 
-    static func shouldStopToggleRecordingWithEscape(
+    static func shouldCancelRecordingWithEscape(
         keyCode: UInt16,
         isRepeat: Bool,
-        toggleRecordingIsActive: Bool
+        recordingIsActive: Bool
     ) -> Bool {
-        keyCode == escapeKeyCode && !isRepeat && toggleRecordingIsActive
+        keyCode == escapeKeyCode && !isRepeat && recordingIsActive
     }
 
     private func triggerToggleIfNeeded(source: String) {

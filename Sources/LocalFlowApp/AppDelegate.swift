@@ -113,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self?.updateMenu(for: status)
             if case .recording = status {
+                self?.hotkeyController?.setApplicationRecordingActive(true)
                 return
             }
             self?.hotkeyController?.clearToggleRecordingState()
@@ -148,6 +149,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyController.onToggle = { [weak self] in
             self?.dictationController?.toggleRecording()
+        }
+        hotkeyController.onCancel = { [weak self] in
+            self?.dictationController?.cancelRecording()
         }
         hotkeyController.onDiagnosticEvent = { [weak self] event in
             self?.updateLastHotkey(event)
@@ -477,6 +481,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyController.onToggle = { [weak dictationController] in
             dictationController?.toggleRecording()
+        }
+        hotkeyController.onCancel = { [weak dictationController] in
+            dictationController?.cancelRecording()
         }
         hotkeyController.onDiagnosticEvent = { [weak self] event in
             self?.updateLastHotkey(event)

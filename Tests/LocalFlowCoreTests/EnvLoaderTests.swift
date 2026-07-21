@@ -31,7 +31,7 @@ final class EnvLoaderTests: XCTestCase {
         ])
 
         XCTAssertTrue(configuration.isOpenAIConfigured)
-        XCTAssertEqual(configuration.transcriptionModel, "gpt-4o-transcribe")
+        XCTAssertEqual(configuration.transcriptionModel, "gpt-4o-mini-transcribe")
         XCTAssertEqual(configuration.transcriptionLanguage, "fr")
         XCTAssertTrue(configuration.enablePolish)
         XCTAssertEqual(configuration.historyRetentionDays, 14)

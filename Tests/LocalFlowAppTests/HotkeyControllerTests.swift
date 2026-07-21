@@ -22,23 +22,23 @@ final class HotkeyControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testEscapeStopsAnActiveToggleRecording() {
+    func testEscapeCancelsAnActiveRecording() {
         XCTAssertTrue(
-            HotkeyController.shouldStopToggleRecordingWithEscape(
+            HotkeyController.shouldCancelRecordingWithEscape(
                 keyCode: 53,
                 isRepeat: false,
-                toggleRecordingIsActive: true
+                recordingIsActive: true
             )
         )
     }
 
     @MainActor
-    func testEscapePassesThroughWhenToggleRecordingIsInactive() {
+    func testEscapePassesThroughWhenRecordingIsInactive() {
         XCTAssertFalse(
-            HotkeyController.shouldStopToggleRecordingWithEscape(
+            HotkeyController.shouldCancelRecordingWithEscape(
                 keyCode: 53,
                 isRepeat: false,
-                toggleRecordingIsActive: false
+                recordingIsActive: false
             )
         )
     }
@@ -46,17 +46,17 @@ final class HotkeyControllerTests: XCTestCase {
     @MainActor
     func testRepeatedEscapeAndOtherKeysPassThrough() {
         XCTAssertFalse(
-            HotkeyController.shouldStopToggleRecordingWithEscape(
+            HotkeyController.shouldCancelRecordingWithEscape(
                 keyCode: 53,
                 isRepeat: true,
-                toggleRecordingIsActive: true
+                recordingIsActive: true
             )
         )
         XCTAssertFalse(
-            HotkeyController.shouldStopToggleRecordingWithEscape(
+            HotkeyController.shouldCancelRecordingWithEscape(
                 keyCode: 49,
                 isRepeat: false,
-                toggleRecordingIsActive: true
+                recordingIsActive: true
             )
         )
     }

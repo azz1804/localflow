@@ -104,17 +104,38 @@ final class TextInsertionService {
             return .pasted
         }
 
-        let delay = max(0, restoreDelayMilliseconds)
-        try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
-
-        // Do not overwrite clipboard content copied by the user or another app
-        // while the temporary dictation text was available.
-        guard pasteboard.changeCount == insertedTextChangeCount else {
-            return .pasted
-        }
-
-        restore(snapshot, to: pasteboard)
+        scheduleClipboardRestore(
+            snapshot,
+            pasteboard: pasteboard,
+            insertedTextChangeCount: insertedTextChangeCount,
+            delayMilliseconds: restoreDelayMilliseconds
+        )
         return .pasted
+    }
+
+    private func scheduleClipboardRestore(
+        _ snapshot: ClipboardSnapshot,
+        pasteboard: NSPasteboard,
+        insertedTextChangeCount: Int,
+        delayMilliseconds: Int
+    ) {
+        let delay = max(0, delayMilliseconds)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(delay) * 1_000_000
+            )
+            guard !Task.isCancelled else {
+                return
+            }
+
+            // Do not overwrite clipboard content copied by the user or another
+            // app while the temporary dictation text was available.
+            guard pasteboard.changeCount == insertedTextChangeCount else {
+                return
+            }
+
+            self?.restore(snapshot, to: pasteboard)
+        }
     }
 
     nonisolated static func shouldPaste(
