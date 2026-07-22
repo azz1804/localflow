@@ -10,12 +10,14 @@ cd "$ROOT_DIR"
 
 APP_PATH="$("$ROOT_DIR/Scripts/build_app.sh")"
 
-osascript -e 'tell application "LocalFlow" to quit' >/dev/null 2>&1 || true
-sleep 1
-
-if pgrep -x LocalFlow >/dev/null 2>&1; then
-  pkill -x LocalFlow >/dev/null 2>&1 || true
+if [[ "${LOCALFLOW_SKIP_TERMINATE:-0}" != "1" ]]; then
+  osascript -e 'tell application "LocalFlow" to quit' >/dev/null 2>&1 || true
   sleep 1
+
+  if pgrep -x LocalFlow >/dev/null 2>&1; then
+    pkill -x LocalFlow >/dev/null 2>&1 || true
+    sleep 1
+  fi
 fi
 
 SUPPORT_DIR="$HOME/Library/Application Support/LocalFlow"
@@ -45,5 +47,7 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --verify --deep --strict "$DEST_APP"
 fi
 
-open "$DEST_APP"
+if [[ "${LOCALFLOW_SKIP_LAUNCH:-0}" != "1" ]]; then
+  open "$DEST_APP"
+fi
 echo "$DEST_APP"

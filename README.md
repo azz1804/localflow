@@ -27,6 +27,20 @@ Prerequisites:
 - Xcode or Xcode Command Line Tools.
 - An OpenAI API key.
 
+### Quick install
+
+Install or update LocalFlow with one Terminal command:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/azz1804/localflow/main/install.sh)"
+```
+
+The installer downloads the latest source, builds LocalFlow, installs it in `/Applications`, and launches it. On a first install, it can securely prompt for the OpenAI API key with hidden input. Existing settings and history are preserved during updates.
+
+If Xcode Command Line Tools are missing, macOS opens their installer. Once it finishes, run the command again.
+
+### Manual install
+
 Clone the repository, then create a local `.env` file:
 
 ```bash
