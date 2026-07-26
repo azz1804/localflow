@@ -4,6 +4,27 @@ import AppKit
 enum LocalFlowMain {
     @MainActor
     static func main() {
+        if let brandAssetsIndex = CommandLine.arguments.firstIndex(
+            of: "--render-brand-assets"
+        ),
+           CommandLine.arguments.indices.contains(brandAssetsIndex + 1) {
+            let outputDirectory = URL(
+                fileURLWithPath: CommandLine.arguments[brandAssetsIndex + 1],
+                isDirectory: true
+            )
+            do {
+                try LocalFlowUIPreviewRenderer.renderBrandAssets(
+                    to: outputDirectory
+                )
+            } catch {
+                fputs(
+                    "LocalFlow brand rendering failed: \(error.localizedDescription)\n",
+                    stderr
+                )
+            }
+            return
+        }
+
         if CommandLine.arguments.contains("--probe-audio-cadence") {
             runAudioCadenceProbe()
             return

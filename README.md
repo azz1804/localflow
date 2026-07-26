@@ -122,6 +122,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
 - Press `Escape` to discard the active recording without transcribing or pasting it.
+- Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
 - Choose `Open History` from the menu bar icon for instant access to recent transcripts.
@@ -203,7 +204,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 79 unit tests passing.
+- `swift test`: 85 unit tests passing.
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.

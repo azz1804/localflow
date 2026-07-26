@@ -1,4 +1,5 @@
 import AppKit
+import LocalFlowCore
 import XCTest
 @testable import LocalFlowApp
 
@@ -83,5 +84,189 @@ final class HotkeyControllerTests: XCTestCase {
                 recordingIsActive: true
             )
         )
+    }
+
+    @MainActor
+    func testEscapeUsesLiveDictationStateAfterHotkeyStateWasReset() {
+        let controller = HotkeyController(
+            holdHotkey: "fn",
+            fallbackHoldHotkey: "option+space",
+            toggleHotkey: "fn+space"
+        )
+        var recordingIsActive = true
+        var cancellationCount = 0
+        controller.recordingCancellationIsAvailable = {
+            recordingIsActive
+        }
+        controller.onCancel = {
+            cancellationCount += 1
+            recordingIsActive = false
+        }
+
+        XCTAssertTrue(
+            controller.handleEscapeKeyDown(
+                keyCode: 53,
+                isRepeat: false,
+                source: "test"
+            )
+        )
+        XCTAssertEqual(cancellationCount, 1)
+
+        XCTAssertFalse(
+            controller.handleEscapeKeyDown(
+                keyCode: 53,
+                isRepeat: false,
+                source: "test"
+            )
+        )
+        XCTAssertEqual(cancellationCount, 1)
+    }
+
+    @MainActor
+    func testDuplicateEscapeSourcesCancelOnlyOnceWhileStartIsPending() {
+        let controller = HotkeyController(
+            holdHotkey: "fn",
+            fallbackHoldHotkey: "option+space",
+            toggleHotkey: "fn+space"
+        )
+        var cancellationCount = 0
+        controller.recordingCancellationIsAvailable = { true }
+        controller.onCancel = {
+            cancellationCount += 1
+        }
+
+        XCTAssertTrue(
+            controller.handleEscapeKeyDown(
+                keyCode: 53,
+                isRepeat: false,
+                source: "escape-cg-key"
+            )
+        )
+        XCTAssertFalse(
+            controller.handleEscapeKeyDown(
+                keyCode: 53,
+                isRepeat: false,
+                source: "escape-nsevent-key"
+            )
+        )
+        XCTAssertEqual(cancellationCount, 1)
+
+        controller.clearToggleRecordingState()
+        controller.setApplicationRecordingActive(true)
+        XCTAssertTrue(
+            controller.handleEscapeKeyDown(
+                keyCode: 53,
+                isRepeat: false,
+                source: "next-recording"
+            )
+        )
+        XCTAssertEqual(cancellationCount, 2)
+    }
+
+    func testHotkeyRestartIsDeferredUntilRecordingEnds() {
+        var coordinator = HotkeyRestartCoordinator()
+
+        XCTAssertFalse(
+            coordinator.requestRestart(recordingIsActive: true)
+        )
+        XCTAssertTrue(coordinator.isRestartDeferred)
+        XCTAssertFalse(
+            coordinator.consumeDeferredRestart(recordingIsActive: true)
+        )
+        XCTAssertTrue(
+            coordinator.consumeDeferredRestart(recordingIsActive: false)
+        )
+        XCTAssertFalse(coordinator.isRestartDeferred)
+        XCTAssertFalse(
+            coordinator.consumeDeferredRestart(recordingIsActive: false)
+        )
+    }
+
+    @MainActor
+    func testEscapeCancelsARecordingBeforeItsStartTaskRuns() async {
+        let historyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("history.jsonl")
+        let controller = DictationController(
+            configuration: AppConfiguration(),
+            dictionary: .empty,
+            historyStore: HistoryStore(url: historyURL)
+        )
+        var statuses: [AppStatus] = []
+        controller.onStatusChanged = { status, _ in
+            statuses.append(status)
+        }
+
+        controller.beginHoldRecording()
+        XCTAssertTrue(controller.canCancelRecording)
+        controller.cancelRecording()
+        XCTAssertFalse(controller.canCancelRecording)
+
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(statuses, [.idle])
+        XCTAssertFalse(controller.canCancelRecording)
+    }
+
+    @MainActor
+    func testReleasingHoldCancelsARecordingBeforeItsStartTaskRuns() async {
+        let historyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("history.jsonl")
+        let controller = DictationController(
+            configuration: AppConfiguration(),
+            dictionary: .empty,
+            historyStore: HistoryStore(url: historyURL)
+        )
+        var statuses: [AppStatus] = []
+        controller.onStatusChanged = { status, _ in
+            statuses.append(status)
+        }
+
+        controller.beginHoldRecording()
+        XCTAssertTrue(controller.canCancelRecording)
+        controller.endHoldRecording()
+        XCTAssertFalse(controller.canCancelRecording)
+
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(statuses, [.idle])
+        XCTAssertFalse(controller.canCancelRecording)
+    }
+
+    @MainActor
+    func testPendingHoldCanLockIntoToggleBeforeRecorderStarts() async {
+        let historyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("history.jsonl")
+        let controller = DictationController(
+            configuration: AppConfiguration(),
+            dictionary: .empty,
+            historyStore: HistoryStore(url: historyURL)
+        )
+        var statuses: [AppStatus] = []
+        controller.onStatusChanged = { status, _ in
+            statuses.append(status)
+        }
+
+        controller.beginHoldRecording()
+        controller.lockCurrentHoldRecording()
+
+        XCTAssertEqual(statuses, [.recording(0, .toggle)])
+        controller.cancelRecording()
+        await Task.yield()
+
+        XCTAssertEqual(statuses, [.recording(0, .toggle), .idle])
+        XCTAssertFalse(controller.canCancelRecording)
+
+        statuses.removeAll()
+        controller.beginHoldRecording()
+        controller.endHoldRecording()
+        await Task.yield()
+
+        XCTAssertEqual(statuses, [.idle])
+        XCTAssertFalse(controller.canCancelRecording)
     }
 }

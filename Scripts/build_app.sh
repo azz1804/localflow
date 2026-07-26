@@ -44,9 +44,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>0.2.0</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>2</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>
@@ -69,6 +69,14 @@ fi
 
 if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then
   cp "$ROOT_DIR/Assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+fi
+
+if [[ -f "$ROOT_DIR/Assets/BrandOrb.png" ]]; then
+  cp "$ROOT_DIR/Assets/BrandOrb.png" "$RESOURCES_DIR/BrandOrb.png"
+fi
+
+if [[ -f "$ROOT_DIR/Assets/MenuBarOrb.png" ]]; then
+  cp "$ROOT_DIR/Assets/MenuBarOrb.png" "$RESOURCES_DIR/MenuBarOrb.png"
 fi
 
 if command -v codesign >/dev/null 2>&1; then

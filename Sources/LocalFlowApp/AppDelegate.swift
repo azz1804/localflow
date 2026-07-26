@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindowController: SettingsWindowController?
     private var accessibilityRetryTimer: Timer?
     private var permissionRetryBaseline: (accessibility: Bool, inputMonitoring: Bool)?
+    private var hotkeyRestartCoordinator = HotkeyRestartCoordinator()
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
@@ -120,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             self?.hotkeyController?.clearToggleRecordingState()
+            self?.performDeferredHotkeyRestartIfNeeded()
         }
         dictationController.onRecordingFrame = { [weak self] status, visualization in
             self?.floatingBarController?.update(
@@ -142,24 +144,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleHotkey: configuration.toggleHotkey
         )
 
-        hotkeyController.onHoldStart = { [weak self] in
-            self?.dictationController?.beginHoldRecording()
-        }
-        hotkeyController.onHoldEnd = { [weak self] in
-            self?.dictationController?.endHoldRecording()
-        }
-        hotkeyController.onHoldLocked = { [weak self] in
-            self?.dictationController?.lockCurrentHoldRecording()
-        }
-        hotkeyController.onToggle = { [weak self] in
-            self?.dictationController?.toggleRecording()
-        }
-        hotkeyController.onCancel = { [weak self] in
-            self?.dictationController?.cancelRecording()
-        }
-        hotkeyController.onDiagnosticEvent = { [weak self] event in
-            self?.updateLastHotkey(event)
-        }
+        configureHotkeyCallbacks(
+            hotkeyController,
+            dictationController: dictationController
+        )
         let started = hotkeyController.start()
         LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
 
@@ -194,28 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.behavior = []
         statusItem.isVisible = true
 
-        if let icon = NSImage(
-            systemSymbolName: "waveform.circle.fill",
-            accessibilityDescription: "LocalFlow"
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(
-                pointSize: 16,
-                weight: .semibold
-            )
-            .applying(
-                NSImage.SymbolConfiguration(
-                    paletteColors: [
-                        .white,
-                        NSColor(
-                            calibratedRed: 0.42,
-                            green: 0.3,
-                            blue: 0.96,
-                            alpha: 1
-                        )
-                    ]
-                )
-            )
-        ) {
+        if let icon = makeStatusItemIcon() {
             icon.isTemplate = false
             statusItem.button?.image = icon
             statusItem.button?.imagePosition = .imageOnly
@@ -264,6 +231,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         self.statusItem = statusItem
+    }
+
+    private func makeStatusItemIcon() -> NSImage? {
+        if let url = Bundle.main.url(
+            forResource: "MenuBarOrb",
+            withExtension: "png"
+        ),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
+            image.accessibilityDescription = "LocalFlow"
+            return image
+        }
+
+        return NSImage(
+            systemSymbolName: "circle.hexagongrid.fill",
+            accessibilityDescription: "LocalFlow"
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(
+                pointSize: 16,
+                weight: .semibold
+            )
+        )
     }
 
     private func configureLaunchAtLogin() {
@@ -482,7 +471,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    private func restartHotkeys() {
+    private func restartHotkeys(reason: String = "requested") {
+        let recordingIsActive = dictationController?.canCancelRecording == true
+        guard hotkeyRestartCoordinator.requestRestart(
+            recordingIsActive: recordingIsActive
+        ) else {
+            LocalFlowLogger.log(
+                "Hotkey restart deferred reason=\(reason) recording=true"
+            )
+            return
+        }
+
+        performHotkeyRestart(reason: reason)
+    }
+
+    private func performHotkeyRestart(reason: String) {
         hotkeyController?.stop()
 
         let hotkeyController = HotkeyController(
@@ -490,6 +493,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fallbackHoldHotkey: configuration.fallbackHoldHotkey,
             toggleHotkey: configuration.toggleHotkey
         )
+        configureHotkeyCallbacks(
+            hotkeyController,
+            dictationController: dictationController
+        )
+        let started = hotkeyController.start()
+        hotkeyController.setApplicationRecordingActive(
+            dictationController?.canCancelRecording == true
+        )
+        self.hotkeyController = hotkeyController
+        LocalFlowLogger.log("Hotkey start reason=\(reason) started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
+        refreshPermissionMenuState()
+
+        if !started {
+            scheduleHotkeyRetryAfterPermissionPrompt()
+        }
+    }
+
+    private func configureHotkeyCallbacks(
+        _ hotkeyController: HotkeyController,
+        dictationController: DictationController?
+    ) {
         hotkeyController.onHoldStart = { [weak dictationController] in
             dictationController?.beginHoldRecording()
         }
@@ -505,16 +529,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onCancel = { [weak dictationController] in
             dictationController?.cancelRecording()
         }
+        hotkeyController.recordingCancellationIsAvailable = {
+            [weak dictationController] in
+            dictationController?.canCancelRecording == true
+        }
         hotkeyController.onDiagnosticEvent = { [weak self] event in
             self?.updateLastHotkey(event)
         }
-        let started = hotkeyController.start()
-        self.hotkeyController = hotkeyController
-        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
-        refreshPermissionMenuState()
+    }
 
-        if !started {
-            scheduleHotkeyRetryAfterPermissionPrompt()
+    private func performDeferredHotkeyRestartIfNeeded() {
+        guard hotkeyRestartCoordinator.consumeDeferredRestart(
+            recordingIsActive: dictationController?.canCancelRecording == true
+        ) else {
+            return
+        }
+
+        // Let the current key event finish before replacing its event tap.
+        Task { @MainActor [weak self] in
+            self?.restartHotkeys(reason: "deferred-after-recording")
         }
     }
 

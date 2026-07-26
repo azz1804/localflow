@@ -4,6 +4,35 @@ import SwiftUI
 
 @MainActor
 enum LocalFlowUIPreviewRenderer {
+    static func renderBrandAssets(to outputDirectory: URL) throws {
+        try FileManager.default.createDirectory(
+            at: outputDirectory,
+            withIntermediateDirectories: true
+        )
+        try renderSwiftUIView(
+            LocalFlowAppIconArtwork(),
+            size: NSSize(width: 1_024, height: 1_024),
+            to: outputDirectory.appendingPathComponent("AppIcon.png")
+        )
+        try renderSwiftUIView(
+            LocalFlowBrandOrb(diameter: 224)
+                .frame(width: 256, height: 256),
+            size: NSSize(width: 256, height: 256),
+            to: outputDirectory.appendingPathComponent("BrandOrb.png")
+        )
+        try renderSwiftUIView(
+            LocalFlowCompactAppIconArtwork(),
+            size: NSSize(width: 256, height: 256),
+            to: outputDirectory.appendingPathComponent("CompactAppIcon.png")
+        )
+        try renderSwiftUIView(
+            LocalFlowCompactBrandOrb(diameter: 64)
+                .frame(width: 72, height: 72),
+            size: NSSize(width: 72, height: 72),
+            to: outputDirectory.appendingPathComponent("MenuBarOrb.png")
+        )
+    }
+
     static func render(to outputDirectory: URL) throws {
         try FileManager.default.createDirectory(
             at: outputDirectory,
@@ -177,6 +206,34 @@ enum LocalFlowUIPreviewRenderer {
             until: Date().addingTimeInterval(processing ? 0.46 : 0.24)
         )
         try writePNG(of: view, to: outputURL)
+        window.orderOut(nil)
+    }
+
+    private static func renderSwiftUIView<Content: View>(
+        _ content: Content,
+        size: NSSize,
+        to outputURL: URL
+    ) throws {
+        let hostingView = NSHostingView(
+            rootView: content
+                .frame(width: size.width, height: size.height)
+                .environment(\.colorScheme, .dark)
+        )
+        hostingView.frame = NSRect(origin: .zero, size: size)
+
+        let window = NSWindow(
+            contentRect: hostingView.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.orderFrontRegardless()
+        hostingView.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+        try writePNG(of: hostingView, to: outputURL)
         window.orderOut(nil)
     }
 

@@ -601,7 +601,7 @@ private struct ReferenceHubVoiceOrb: View {
     }
 }
 
-private struct ReferenceLiquidOrbSurface: View {
+struct ReferenceLiquidOrbSurface: View {
     var motion: LiquidOrbMotionSample
     var theme: OrbTheme
     var contourDetail: Int

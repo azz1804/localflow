@@ -11,6 +11,11 @@ final class DictationController {
         get { configuration.enablePolish }
         set { configuration.enablePolish = newValue }
     }
+    var canCancelRecording: Bool {
+        pendingRecordingStartTask != nil
+            || isStarting
+            || audioRecorder.isRecording
+    }
 
     private var configuration: AppConfiguration
     private var dictionary: PersonalDictionary
@@ -25,6 +30,8 @@ final class DictationController {
     private var recordingInsertionTarget: TextInsertionTarget?
     private var recordingStartedAt: Date?
     private var recordingFrameDriver: RecordingFrameDriver?
+    private var pendingRecordingStartTask: Task<Void, Never>?
+    private var pendingRecordingMode: RecordingMode?
     private var isStarting = false
     private var isProcessing = false
     private var shouldStopWhenStarted = false
@@ -64,11 +71,17 @@ final class DictationController {
     }
 
     func beginHoldRecording() {
-        Task { await startRecording(mode: .hold) }
+        scheduleRecordingStart(mode: .hold)
     }
 
     func endHoldRecording() {
         guard recordingMode == .hold else {
+            return
+        }
+
+        if cancelPendingRecordingStart() {
+            LocalFlowLogger.log("Pending hold recording cancelled before start")
+            setStatus(.idle)
             return
         }
 
@@ -82,6 +95,12 @@ final class DictationController {
     }
 
     func toggleRecording() {
+        if cancelPendingRecordingStart() {
+            LocalFlowLogger.log("Pending toggle recording cancelled before start")
+            setStatus(.idle)
+            return
+        }
+
         if isStarting {
             shouldStopWhenStarted = true
             LocalFlowLogger.log("Recording toggle stop queued while recorder is starting")
@@ -92,13 +111,19 @@ final class DictationController {
         case .recording:
             Task { await stopAndProcessRecording() }
         case .idle, .done, .error:
-            Task { await startRecording(mode: .toggle) }
+            scheduleRecordingStart(mode: .toggle)
         case .processing:
             break
         }
     }
 
     func cancelRecording() {
+        if cancelPendingRecordingStart() {
+            LocalFlowLogger.log("Pending recording cancelled before start")
+            setStatus(.idle)
+            return
+        }
+
         if isStarting {
             shouldCancelWhenStarted = true
             shouldStopWhenStarted = false
@@ -111,6 +136,16 @@ final class DictationController {
 
     func lockCurrentHoldRecording() {
         guard recordingMode == .hold else {
+            return
+        }
+
+        if pendingRecordingStartTask != nil {
+            pendingRecordingMode = .toggle
+            recordingMode = .toggle
+            LocalFlowLogger.log(
+                "Recording lock queued before recorder starts"
+            )
+            setStatus(.recording(0, .toggle))
             return
         }
 
@@ -133,10 +168,16 @@ final class DictationController {
     }
 
     func startManualRecording() {
-        Task { await startRecording(mode: .toggle) }
+        scheduleRecordingStart(mode: .toggle)
     }
 
     func stopManualRecording() {
+        if cancelPendingRecordingStart() {
+            LocalFlowLogger.log("Pending manual recording cancelled before start")
+            setStatus(.idle)
+            return
+        }
+
         if isStarting {
             shouldStopWhenStarted = true
             LocalFlowLogger.log("Manual stop queued while recorder is starting")
@@ -144,6 +185,40 @@ final class DictationController {
         }
 
         Task { await stopAndProcessRecording() }
+    }
+
+    private func scheduleRecordingStart(mode: RecordingMode) {
+        guard pendingRecordingStartTask == nil,
+              !isStarting,
+              !isProcessing,
+              !audioRecorder.isRecording else {
+            return
+        }
+
+        pendingRecordingMode = mode
+        pendingRecordingStartTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled else {
+                return
+            }
+
+            let requestedMode = self.pendingRecordingMode ?? mode
+            self.pendingRecordingStartTask = nil
+            self.pendingRecordingMode = nil
+            await self.startRecording(mode: requestedMode)
+        }
+    }
+
+    @discardableResult
+    private func cancelPendingRecordingStart() -> Bool {
+        guard let pendingRecordingStartTask else {
+            return false
+        }
+
+        pendingRecordingStartTask.cancel()
+        self.pendingRecordingStartTask = nil
+        pendingRecordingMode = nil
+        recordingMode = .hold
+        return true
     }
 
     private func startRecording(mode: RecordingMode) async {
@@ -395,6 +470,7 @@ final class DictationController {
     }
 
     private func resetRecordingState() {
+        cancelPendingRecordingStart()
         shouldStopWhenStarted = false
         shouldCancelWhenStarted = false
         recordingTargetApplication = nil

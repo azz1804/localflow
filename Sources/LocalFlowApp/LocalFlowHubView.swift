@@ -140,25 +140,12 @@ private struct HubSidebar: View {
 
     private var brand: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                HubPalette.purple,
-                                HubPalette.blue.opacity(0.9)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .shadow(color: HubPalette.purple.opacity(0.2), radius: 12, y: 5)
-
-                Image(systemName: "waveform")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 40, height: 40)
+            LocalFlowBrandLogo(diameter: 44)
+                .shadow(
+                    color: HubPalette.purple.opacity(0.28),
+                    radius: 10,
+                    y: 4
+                )
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("LocalFlow")
@@ -169,6 +156,8 @@ private struct HubSidebar: View {
                     .foregroundStyle(.white.opacity(0.45))
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("LocalFlow, private dictation")
     }
 
     private var shortcutCard: some View {
