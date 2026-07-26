@@ -736,6 +736,18 @@ private final class AudioCaptureSink: @unchecked Sendable {
     }
 }
 
+final class AudioAnalysisCadenceGate: @unchecked Sendable {
+    private var callbackIndex = 0
+
+    // The hardware callback currently arrives around 85-87 Hz. Analyzing two
+    // out of every three buffers keeps fresh voice data near 58 Hz while
+    // removing a third of the FFT/filter work from CoreAudio's render thread.
+    func shouldAnalyzeCurrentBuffer() -> Bool {
+        defer { callbackIndex = (callbackIndex + 1) % 3 }
+        return callbackIndex != 2
+    }
+}
+
 @MainActor
 final class MicrophoneAudioCapture {
     private let engine = AVAudioEngine()
@@ -828,11 +840,16 @@ final class MicrophoneAudioCapture {
         format: AVAudioFormat
     ) -> AVAudioSinkNode {
         let accumulator = accumulator
+        let cadenceGate = AudioAnalysisCadenceGate()
         let sampleRate = format.sampleRate
         let isInterleaved = format.isInterleaved
 
         return AVAudioSinkNode {
             _, frameCount, inputData -> OSStatus in
+            guard cadenceGate.shouldAnalyzeCurrentBuffer() else {
+                return noErr
+            }
+
             let audioBuffer = inputData.pointee.mBuffers
             guard let rawData = audioBuffer.mData else {
                 return noErr

@@ -44,10 +44,21 @@ public final class HistoryStore {
 
     public func append(_ record: DictationRecord) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var data = (try? Data(contentsOf: url)) ?? Data()
-        data.append(try encoder.encode(record))
-        data.append(Data("\n".utf8))
-        try data.write(to: url, options: .atomic)
+        var line = try encoder.encode(record)
+        line.append(Data("\n".utf8))
+
+        if !FileManager.default.fileExists(atPath: url.path) {
+            _ = FileManager.default.createFile(
+                atPath: url.path,
+                contents: nil
+            )
+        }
+
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: line)
+        try handle.synchronize()
     }
 
     public func load(limit: Int? = nil) throws -> [DictationRecord] {

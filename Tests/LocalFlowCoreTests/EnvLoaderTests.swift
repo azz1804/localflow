@@ -60,4 +60,24 @@ final class EnvLoaderTests: XCTestCase {
 
         XCTAssertEqual(roundTripped, configuration)
     }
+
+    func testConfigurationStoreRestrictsAPIKeyFilePermissions() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "LocalFlowConfigurationTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent(".env")
+
+        try ConfigurationStore.save(
+            AppConfiguration(openAIAPIKey: "sk-private"),
+            to: url
+        )
+
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: url.path
+        )
+        XCTAssertEqual(attributes[.posixPermissions] as? Int, 0o600)
+    }
 }

@@ -129,6 +129,10 @@ public enum ConfigurationStore {
     public static func save(_ configuration: AppConfiguration, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try configuration.envFileContents().write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
     }
 }
 

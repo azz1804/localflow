@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictionarySourceURL: URL?
     private var appSupportURL = LocalFlowPaths.appSupportDirectory
     private var historyURL = LocalFlowPaths.appSupportDirectory.appendingPathComponent("history.jsonl")
+    private var historyRecordsCache: [DictationRecord] = []
 
     private var statusItem: NSStatusItem?
     private var dictationController: DictationController?
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        LocalFlowLogger.log("Application will terminate")
         accessibilityRetryTimer?.invalidate()
         hotkeyController?.stop()
     }
@@ -95,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let historyStore = HistoryStore(url: historyURL)
         try historyStore.prune(retentionDays: configuration.historyRetentionDays)
+        historyRecordsCache = try historyStore.load(limit: 500)
     }
 
     private func setupControllers() {
@@ -125,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         dictationController.onHistoryRecordCreated = { [weak self] record in
+            self?.cacheHistoryRecord(record)
             self?.settingsWindowController?.insertHistoryRecord(record)
             self?.refreshOrbProgression()
         }
@@ -230,6 +234,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let historyItem = NSMenuItem(
+            title: "Open History",
+            action: #selector(showHistory),
+            keyEquivalent: ""
+        )
+        historyItem.image = NSImage(
+            systemSymbolName: "clock.arrow.circlepath",
+            accessibilityDescription: "Open History"
+        )
+        historyItem.target = self
+        menu.addItem(historyItem)
 
         menu.addItem(.separator())
 
@@ -375,6 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showMainWindow() {
         presentMainWindow(selectHistory: false, selectHome: true)
+    }
+
+    @objc private func showHistory() {
+        presentMainWindow(selectHistory: true)
     }
 
     private func presentMainWindow(selectHistory: Bool, selectHome: Bool = false) {
@@ -546,7 +566,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try ConfigurationStore.save(updatedConfiguration, to: url)
                 self.envSourceURL = url
                 self.configuration = updatedConfiguration
-                try HistoryStore(url: self.historyURL).prune(retentionDays: updatedConfiguration.historyRetentionDays)
+                let historyStore = HistoryStore(url: self.historyURL)
+                try historyStore.prune(retentionDays: updatedConfiguration.historyRetentionDays)
+                self.historyRecordsCache = try historyStore.load(limit: 500)
                 self.refreshOrbProgression()
                 self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
                 self.restartHotkeys()
@@ -581,6 +603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             do {
                 try HistoryStore(url: self.historyURL).clear()
+                self.historyRecordsCache = []
                 self.floatingBarController?.updateTotalWords(
                     0,
                     overrideID: self.configuration.orbThemeOverride
@@ -652,7 +675,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func loadHistoryRecords() -> [DictationRecord] {
-        (try? HistoryStore(url: historyURL).load(limit: 500)) ?? []
+        historyRecordsCache
+    }
+
+    private func cacheHistoryRecord(_ record: DictationRecord) {
+        historyRecordsCache.removeAll { $0.id == record.id }
+        historyRecordsCache.insert(record, at: 0)
+        if historyRecordsCache.count > 500 {
+            historyRecordsCache.removeLast(historyRecordsCache.count - 500)
+        }
     }
 
     private func refreshOrbProgression() {

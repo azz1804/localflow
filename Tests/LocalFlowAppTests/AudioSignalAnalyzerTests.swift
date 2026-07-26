@@ -3,6 +3,24 @@ import XCTest
 @testable import LocalFlowApp
 
 final class AudioSignalAnalyzerTests: XCTestCase {
+    func testAudioAnalysisCadenceStaysNearDisplayRefreshRate() {
+        let gate = AudioAnalysisCadenceGate()
+
+        let decisions = (0..<12).map { _ in
+            gate.shouldAnalyzeCurrentBuffer()
+        }
+
+        XCTAssertEqual(
+            decisions,
+            [
+                true, true, false,
+                true, true, false,
+                true, true, false,
+                true, true, false
+            ]
+        )
+    }
+
     func testSilenceProducesZeroGain() {
         let samples = Array(repeating: Float(0), count: 512)
 

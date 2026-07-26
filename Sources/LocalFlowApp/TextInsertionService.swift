@@ -35,10 +35,15 @@ enum FocusedTextTargetState: String {
     case editable
     case notEditable
     case unknown
+    case secure
 }
 
 @MainActor
 final class TextInsertionService {
+    private var clipboardRestoreTask: Task<Void, Never>?
+    private var pendingClipboardSnapshot: ClipboardSnapshot?
+    private var pendingClipboardChangeCount: Int?
+
     func captureTarget() -> TextInsertionTarget {
         let application = NSWorkspace.shared.frontmostApplication
         let target = TextInsertionTarget(
@@ -66,12 +71,12 @@ final class TextInsertionService {
         }
 
         let pasteboard = NSPasteboard.general
+        flushPendingClipboardRestore(on: pasteboard)
         let currentState = focusedTextTargetState()
-        let currentProcessIdentifier = NSWorkspace.shared
-            .frontmostApplication?
-            .processIdentifier
-        let capturedEditableTargetIsStillActive = Self
-            .capturedEditableTargetIsStillActive(
+        let currentApplication = NSWorkspace.shared.frontmostApplication
+        let currentProcessIdentifier = currentApplication?.processIdentifier
+        let capturedApplicationIsStillActive = Self
+            .capturedApplicationIsStillActive(
                 target,
                 currentProcessIdentifier: currentProcessIdentifier
             )
@@ -82,7 +87,7 @@ final class TextInsertionService {
             currentProcessIdentifier: currentProcessIdentifier
         )
         LocalFlowLogger.log(
-            "Insertion target resolved captured=\(target?.focusedState.rawValue ?? "-") current=\(currentState.rawValue) sameApp=\(capturedEditableTargetIsStillActive) paste=\(canPasteIntoFocusedElement)"
+            "Insertion target resolved captured=\(target?.focusedState.rawValue ?? "-") current=\(currentState.rawValue) sameProcess=\(capturedApplicationIsStillActive) currentPID=\(currentProcessIdentifier.map(String.init) ?? "-") currentBundle=\(currentApplication?.bundleIdentifier ?? "-") strategy=\(canPasteIntoFocusedElement ? "keyboard" : "clipboard")"
         )
         let snapshot = restoreClipboard && canPasteIntoFocusedElement
             ? capture(pasteboard: pasteboard)
@@ -98,7 +103,14 @@ final class TextInsertionService {
             return .copiedToClipboard
         }
 
-        try sendPasteKeystroke()
+        do {
+            try sendPasteKeystroke()
+        } catch {
+            LocalFlowLogger.log(
+                "Keyboard paste event failed; transcript remains on clipboard error=\(error.localizedDescription)"
+            )
+            return .copiedToClipboard
+        }
 
         guard restoreClipboard, let snapshot else {
             return .pasted
@@ -119,23 +131,63 @@ final class TextInsertionService {
         insertedTextChangeCount: Int,
         delayMilliseconds: Int
     ) {
-        let delay = max(0, delayMilliseconds)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(
-                nanoseconds: UInt64(delay) * 1_000_000
-            )
+        clipboardRestoreTask?.cancel()
+        pendingClipboardSnapshot = snapshot
+        pendingClipboardChangeCount = insertedTextChangeCount
+
+        // Restoring immediately can race the target application reading Cmd-V.
+        // Bound the value so malformed config cannot overflow or retain a
+        // clipboard snapshot indefinitely.
+        let delay = min(5_000, max(150, delayMilliseconds))
+        clipboardRestoreTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(delay))
             guard !Task.isCancelled else {
                 return
             }
 
-            // Do not overwrite clipboard content copied by the user or another
-            // app while the temporary dictation text was available.
-            guard pasteboard.changeCount == insertedTextChangeCount else {
-                return
-            }
-
-            self?.restore(snapshot, to: pasteboard)
+            self?.completePendingClipboardRestore(
+                on: pasteboard,
+                expectedChangeCount: insertedTextChangeCount
+            )
         }
+    }
+
+    private func flushPendingClipboardRestore(on pasteboard: NSPasteboard) {
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = nil
+
+        guard let snapshot = pendingClipboardSnapshot,
+              let changeCount = pendingClipboardChangeCount,
+              pasteboard.changeCount == changeCount else {
+            pendingClipboardSnapshot = nil
+            pendingClipboardChangeCount = nil
+            return
+        }
+
+        restore(snapshot, to: pasteboard)
+        pendingClipboardSnapshot = nil
+        pendingClipboardChangeCount = nil
+    }
+
+    private func completePendingClipboardRestore(
+        on pasteboard: NSPasteboard,
+        expectedChangeCount: Int
+    ) {
+        defer {
+            clipboardRestoreTask = nil
+            pendingClipboardSnapshot = nil
+            pendingClipboardChangeCount = nil
+        }
+
+        // Do not overwrite clipboard content copied by the user or another
+        // app while the temporary dictation text was available.
+        guard pasteboard.changeCount == expectedChangeCount,
+              pendingClipboardChangeCount == expectedChangeCount,
+              let snapshot = pendingClipboardSnapshot else {
+            return
+        }
+
+        restore(snapshot, to: pasteboard)
     }
 
     nonisolated static func shouldPaste(
@@ -147,38 +199,43 @@ final class TextInsertionService {
         guard accessibilityTrusted else {
             return false
         }
-        return currentState != .notEditable
-            || capturedEditableTargetIsStillActive(
-                capturedTarget,
-                currentProcessIdentifier: currentProcessIdentifier
-            )
-            || keyboardPasteFallbackIsSafe(
-                capturedTarget,
-                currentProcessIdentifier: currentProcessIdentifier
-            )
-    }
 
-    nonisolated private static func capturedEditableTargetIsStillActive(
-        _ target: TextInsertionTarget?,
-        currentProcessIdentifier: pid_t?
-    ) -> Bool {
-        target?.focusedState == .editable
-            && target?.processIdentifier != nil
-            && target?.processIdentifier == currentProcessIdentifier
-    }
-
-    nonisolated private static func keyboardPasteFallbackIsSafe(
-        _ target: TextInsertionTarget?,
-        currentProcessIdentifier: pid_t?
-    ) -> Bool {
-        guard target?.processIdentifier != nil,
-              target?.processIdentifier == currentProcessIdentifier,
-              let bundleIdentifier = target?.bundleIdentifier else {
+        guard currentState != .secure,
+              capturedTarget?.focusedState != .secure else {
             return false
         }
-        return keyboardPasteFallbackBundleIdentifiers.contains(
-            bundleIdentifier
-        )
+
+        if capturedTarget?.processIdentifier != nil {
+            // Custom editors such as VS Code, Claude and browser
+            // contenteditables frequently expose AXGroup/AXWebArea instead of
+            // a writable text role. The user explicitly started dictation in
+            // this process, so Cmd-V is the most compatible insertion path.
+            guard capturedApplicationIsStillActive(
+                capturedTarget,
+                currentProcessIdentifier: currentProcessIdentifier
+            ) else {
+                return false
+            }
+
+            switch currentState {
+            case .secure, .notEditable:
+                return false
+            case .editable:
+                return true
+            case .unknown:
+                return capturedTarget?.focusedState != .notEditable
+            }
+        }
+
+        return currentState == .editable
+    }
+
+    nonisolated private static func capturedApplicationIsStillActive(
+        _ target: TextInsertionTarget?,
+        currentProcessIdentifier: pid_t?
+    ) -> Bool {
+        target?.processIdentifier != nil
+            && target?.processIdentifier == currentProcessIdentifier
     }
 
     private func focusedTextTargetState() -> FocusedTextTargetState {
@@ -191,7 +248,10 @@ final class TextInsertionService {
         )
 
         guard focusedResult == .success, let focusedValue else {
-            return focusedResult == .noValue ? .notEditable : .unknown
+            // Electron/Monaco/contenteditable commonly reports no focused AX
+            // element even though keyboard paste is supported. Treat this as
+            // unavailable evidence, not as proof that the target is read-only.
+            return .unknown
         }
         guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else {
             return .unknown
@@ -201,6 +261,16 @@ final class TextInsertionService {
             focusedValue,
             to: AXUIElement.self
         )
+
+        var subroleValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            focusedElement,
+            kAXSubroleAttribute as CFString,
+            &subroleValue
+        ) == .success,
+           (subroleValue as? String) == "AXSecureTextField" {
+            return .secure
+        }
 
         var attributeNamesValue: CFArray?
         let attributeNamesResult = AXUIElementCopyAttributeNames(
@@ -285,7 +355,9 @@ final class TextInsertionService {
         }
 
         if !items.isEmpty {
-            pasteboard.writeObjects(items)
+            if !pasteboard.writeObjects(items) {
+                LocalFlowLogger.log("Clipboard restore write failed")
+            }
         }
     }
 
@@ -306,8 +378,4 @@ final class TextInsertionService {
         keyUp.post(tap: .cghidEventTap)
     }
 
-    nonisolated private static let keyboardPasteFallbackBundleIdentifiers:
-        Set<String> = [
-            "com.openai.codex"
-        ]
 }

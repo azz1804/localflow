@@ -1,7 +1,31 @@
+import AppKit
 import XCTest
 @testable import LocalFlowApp
 
 final class HotkeyControllerTests: XCTestCase {
+    func testFlagsChangedSnapshotNeverQueriesRepeatState() throws {
+        let event = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .flagsChanged,
+                location: .zero,
+                modifierFlags: [.function],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: 63
+            )
+        )
+
+        let snapshot = try XCTUnwrap(HotkeyEventSnapshot(event: event))
+
+        XCTAssertEqual(snapshot.kind, .flagsChanged)
+        XCTAssertFalse(snapshot.isRepeat)
+        XCTAssertEqual(snapshot.keyCode, 63)
+    }
+
     func testTogglePressGateRejectsDelayedDuplicateUntilKeyUp() {
         var gate = HotkeyPressGate()
 

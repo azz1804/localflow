@@ -16,8 +16,9 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - Optional OpenAI polish pass, disabled by default.
 - App-aware prompt hints for Terminal/Codex, Cursor, WhatsApp and Telegram.
 - Local editable dictionary and replacement rules.
-- Automatic paste into the active app through a temporary clipboard.
+- Automatic paste into native and custom editors, including Electron-based apps, through a protected temporary clipboard.
 - Local text-only history with retention pruning.
+- Bounded retries for temporary network, rate-limit and OpenAI service errors.
 
 ## Install from source
 
@@ -123,6 +124,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Press `Escape` to discard the active recording without transcribing or pasting it.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
+- Choose `Open History` from the menu bar icon for instant access to recent transcripts.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Diagnostics > Reload Config and Dictionary`.
 - `Config/dictionary.json` is the project-side fallback copied into the app bundle during build.
@@ -134,6 +136,7 @@ Menu bar items:
 - `Start Recording` / `Stop Recording`: manual recording control.
 - `Polish Dictation`: toggles the optional post-processing pass for the current session.
 - `Open LocalFlow`: opens the graphical interface.
+- `Open History`: opens the graphical interface directly on local transcripts.
 - `Quit LocalFlow`: quits the background app.
 
 ## Graphical interface
@@ -200,7 +203,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 68 unit tests passing.
+- `swift test`: 79 unit tests passing.
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.

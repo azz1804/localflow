@@ -190,17 +190,21 @@ struct HotkeyEventSnapshot: Sendable {
         switch event.type {
         case .flagsChanged:
             kind = .flagsChanged
+            // AppKit raises NSInternalInconsistencyException when isARepeat is
+            // queried on a flagsChanged event. Fn emits this event type.
+            isRepeat = false
         case .keyDown:
             kind = .keyDown
+            isRepeat = event.isARepeat
         case .keyUp:
             kind = .keyUp
+            isRepeat = false
         default:
             return nil
         }
 
         keyCode = event.keyCode
         modifierFlagsRawValue = event.modifierFlags.rawValue
-        isRepeat = event.isARepeat
     }
 }
 

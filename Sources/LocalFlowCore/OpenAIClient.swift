@@ -1,5 +1,26 @@
 import Foundation
 
+public struct OpenAIRetryPolicy: Sendable {
+    public static let `default` = OpenAIRetryPolicy()
+
+    public let maxAttempts: Int
+    public let initialDelay: TimeInterval
+    public let maximumDelay: TimeInterval
+
+    public init(
+        maxAttempts: Int = 3,
+        initialDelay: TimeInterval = 0.2,
+        maximumDelay: TimeInterval = 1
+    ) {
+        let safeMaximumDelay = maximumDelay.isFinite ? maximumDelay : 1
+        let safeInitialDelay = initialDelay.isFinite ? initialDelay : 0.2
+
+        self.maxAttempts = min(max(maxAttempts, 1), 5)
+        self.maximumDelay = min(max(safeMaximumDelay, 0), 10)
+        self.initialDelay = min(max(safeInitialDelay, 0), self.maximumDelay)
+    }
+}
+
 public enum OpenAIClientError: Error, LocalizedError {
     case missingAPIKey
     case invalidURL
@@ -27,12 +48,40 @@ public enum OpenAIClientError: Error, LocalizedError {
 }
 
 public final class OpenAIClient: @unchecked Sendable {
+    private typealias Sleeper = @Sendable (TimeInterval) async throws -> Void
+
     private let apiKey: String
     private let session: URLSession
+    private let retryPolicy: OpenAIRetryPolicy
+    private let sleeper: Sleeper
 
-    public init(apiKey: String, session: URLSession = .shared) {
+    public init(
+        apiKey: String,
+        session: URLSession = .shared,
+        retryPolicy: OpenAIRetryPolicy = .default
+    ) {
         self.apiKey = apiKey
         self.session = session
+        self.retryPolicy = retryPolicy
+        self.sleeper = { delay in
+            guard delay > 0 else {
+                return
+            }
+
+            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+    }
+
+    init(
+        apiKey: String,
+        session: URLSession,
+        retryPolicy: OpenAIRetryPolicy,
+        sleeper: @escaping @Sendable (TimeInterval) async throws -> Void
+    ) {
+        self.apiKey = apiKey
+        self.session = session
+        self.retryPolicy = retryPolicy
+        self.sleeper = sleeper
     }
 
     public func transcribeAudio(
@@ -74,7 +123,7 @@ public final class OpenAIClient: @unchecked Sendable {
         request.setValue(multipart.contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = multipart.data
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(TranscriptionResponse.self, from: data)
@@ -110,7 +159,7 @@ public final class OpenAIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
@@ -120,6 +169,85 @@ public final class OpenAIClient: @unchecked Sendable {
         }
 
         return polishedText
+    }
+
+    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        for attempt in 1...retryPolicy.maxAttempts {
+            let result: (Data, URLResponse)
+
+            do {
+                result = try await session.data(for: request)
+            } catch {
+                guard attempt < retryPolicy.maxAttempts, isRetryableNetworkError(error) else {
+                    throw error
+                }
+
+                try await sleeper(retryDelay(afterFailedAttempt: attempt, response: nil))
+                continue
+            }
+
+            if
+                attempt < retryPolicy.maxAttempts,
+                let httpResponse = result.1 as? HTTPURLResponse,
+                isRetryableHTTPStatus(httpResponse.statusCode)
+            {
+                try await sleeper(retryDelay(afterFailedAttempt: attempt, response: httpResponse))
+                continue
+            }
+
+            return result
+        }
+
+        // maxAttempts is clamped to at least one, so execution cannot reach this point.
+        throw OpenAIClientError.invalidResponse
+    }
+
+    private func retryDelay(afterFailedAttempt attempt: Int, response: HTTPURLResponse?) -> TimeInterval {
+        let exponentialDelay = min(
+            retryPolicy.initialDelay * pow(2, Double(attempt - 1)),
+            retryPolicy.maximumDelay
+        )
+
+        guard
+            let retryAfterValue = response?.value(forHTTPHeaderField: "Retry-After"),
+            let retryAfterDelay = TimeInterval(retryAfterValue),
+            retryAfterDelay >= 0
+        else {
+            return exponentialDelay
+        }
+
+        return min(max(exponentialDelay, retryAfterDelay), retryPolicy.maximumDelay)
+    }
+
+    private func isRetryableHTTPStatus(_ statusCode: Int) -> Bool {
+        statusCode == 429 || [500, 502, 503, 504].contains(statusCode)
+    }
+
+    private func isRetryableNetworkError(_ error: Error) -> Bool {
+        guard !Task.isCancelled else {
+            return false
+        }
+
+        let error = error as NSError
+        guard error.domain == NSURLErrorDomain else {
+            return false
+        }
+
+        switch URLError.Code(rawValue: error.code) {
+        case .timedOut,
+             .cannotFindHost,
+             .cannotConnectToHost,
+             .networkConnectionLost,
+             .dnsLookupFailed,
+             .notConnectedToInternet,
+             .resourceUnavailable,
+             .cannotLoadFromNetwork,
+             .secureConnectionFailed,
+             .backgroundSessionWasDisconnected:
+            return true
+        default:
+            return false
+        }
     }
 
     private func validate(response: URLResponse, data: Data) throws {

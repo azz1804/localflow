@@ -28,6 +28,10 @@ if [[ -f "$ROOT_DIR/.env" && ! -f "$SUPPORT_ENV" ]]; then
   cp "$ROOT_DIR/.env" "$SUPPORT_ENV"
 fi
 
+if [[ -f "$SUPPORT_ENV" ]]; then
+  chmod 600 "$SUPPORT_ENV"
+fi
+
 if [[ "$DEST_DIR" == "/Applications" ]]; then
   if [[ -w "$DEST_DIR" ]]; then
     rm -rf "$DEST_APP"
