@@ -29,10 +29,7 @@ final class AudioSignalAnalyzerTests: XCTestCase {
         }
 
         do {
-            let sink = try AudioCaptureSink(
-                recordingURL: url,
-                format: format
-            )
+            let sink = AudioCaptureSink(recordingURL: url)
             sink.consume(buffer)
             try sink.finish()
         }
@@ -40,6 +37,7 @@ final class AudioSignalAnalyzerTests: XCTestCase {
         let recording = try AVAudioFile(forReading: url)
         XCTAssertEqual(recording.length, AVAudioFramePosition(frameCount))
         XCTAssertTrue(AudioRecordingValidator.hasReadableFrames(at: url))
+        XCTAssertTrue(AudioRecordingValidator.hasUsableSignal(at: url))
     }
 
     func testCaptureSinkAndValidatorRejectHeaderOnlyWAV() throws {
@@ -48,21 +46,79 @@ final class AudioSignalAnalyzerTests: XCTestCase {
             .appendingPathExtension("wav")
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 44_100,
-            channels: 1,
-            interleaved: false
-        )!
         do {
-            let sink = try AudioCaptureSink(
-                recordingURL: url,
-                format: format
-            )
+            let sink = AudioCaptureSink(recordingURL: url)
             XCTAssertThrowsError(try sink.finish())
         }
 
         XCTAssertFalse(AudioRecordingValidator.hasReadableFrames(at: url))
+    }
+
+    func testValidatorRejectsDigitalSilenceWithReadableFrames() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-silent-capture-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        )!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: 4_096
+        )!
+        buffer.frameLength = buffer.frameCapacity
+
+        do {
+            let sink = AudioCaptureSink(recordingURL: url)
+            sink.consume(buffer)
+            try sink.finish()
+        }
+
+        XCTAssertTrue(AudioRecordingValidator.hasReadableFrames(at: url))
+        XCTAssertEqual(
+            AudioRecordingValidator.validate(at: url),
+            .digitalSilence
+        )
+        XCTAssertFalse(AudioRecordingValidator.hasUsableSignal(at: url))
+    }
+
+    func testCaptureSinkAdoptsFirstRealBufferFormat() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-lazy-format-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        )!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: 512
+        )!
+        buffer.frameLength = 512
+        for index in 0..<512 {
+            buffer.floatChannelData![0][index] = Float(
+                sin(Double(index) * 0.08) * 0.15
+            )
+        }
+
+        do {
+            let sink = AudioCaptureSink(recordingURL: url)
+            sink.consume(buffer)
+            try sink.finish()
+        }
+
+        let recording = try AVAudioFile(forReading: url)
+        XCTAssertEqual(recording.fileFormat.sampleRate, 48_000)
+        XCTAssertEqual(recording.fileFormat.channelCount, 1)
+        XCTAssertTrue(AudioRecordingValidator.hasUsableSignal(at: url))
     }
 
     func testRealtimeBufferCopiesLatestPCMWithoutRetainingSourceBuffer() {

@@ -33,10 +33,12 @@ final class PendingDictationStoreTests: XCTestCase {
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: persistedAudioURL.path)
         )
+        XCTAssertNil(job.emptyTranscriptionResponseCount)
 
         job.transcribedText = "texte brut"
         job.finalText = "Texte final."
         job.polished = true
+        job.emptyTranscriptionResponseCount = 2
         job.stage = .ready
         try await store.save(job)
 

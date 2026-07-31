@@ -2,6 +2,15 @@ import AppKit
 import Foundation
 import QuartzCore
 
+/// A synchronous foreign callback can safely carry its arguments across the
+/// bridge below because the value never escapes the callback's main-thread
+/// stack frame. This wrapper makes that lifetime guarantee explicit to Swift's
+/// strict concurrency checker for Objective-C reference types such as
+/// `Notification`, `NSApplication`, and `Timer`.
+struct AppKitCallbackValue<Value>: @unchecked Sendable {
+    let value: Value
+}
+
 /// Bridges synchronous AppKit callbacks into the view's main-actor state.
 ///
 /// AppKit invokes these callbacks from its Objective-C main-thread run loop,
@@ -13,20 +22,20 @@ import QuartzCore
 /// statically main-actor isolated.
 enum AppKitMainThreadBridge {
     @available(*, noasync)
-    nonisolated static func run(
-        _ operation: @MainActor () -> Void
-    ) {
+    nonisolated static func run<Result>(
+        _ operation: @MainActor () -> Result
+    ) -> Result {
         precondition(
             Thread.isMainThread,
             "AppKit view callback was delivered off the main thread"
         )
 
-        withoutActuallyEscaping(operation) { isolatedOperation in
+        return withoutActuallyEscaping(operation) { isolatedOperation in
             let mainThreadOperation = unsafeBitCast(
                 isolatedOperation,
-                to: (() -> Void).self
+                to: (() -> Result).self
             )
-            mainThreadOperation()
+            return mainThreadOperation()
         }
     }
 }

@@ -21,6 +21,22 @@ enum TextInsertionOutcome: Equatable {
     case copiedToClipboard
 }
 
+enum KeyboardPasteDestination: Equatable {
+    case capturedProcess(pid_t)
+    case session
+}
+
+enum KeyboardPasteConfirmation: Equatable {
+    case confirmed
+    case unavailable
+    case mismatch
+}
+
+struct KeyboardPasteResolution: Equatable {
+    var outcome: TextInsertionOutcome
+    var shouldRestoreClipboard: Bool
+}
+
 struct ClipboardSnapshot {
     var items: [[NSPasteboard.PasteboardType: Data]]
 }
@@ -122,8 +138,6 @@ final class TextInsertionService {
         let snapshot = restoreClipboard && canPasteIntoFocusedElement
             ? capture(pasteboard: pasteboard)
             : nil
-        let metricsBeforePaste = textMetrics(for: currentTarget.element)
-
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
             throw TextInsertionError.clipboardWriteFailed
@@ -134,8 +148,31 @@ final class TextInsertionService {
             return .copiedToClipboard
         }
 
+        // Re-resolve immediately before posting the keyboard events. Recording
+        // can take several seconds and focus can move after the initial check;
+        // never deliver to another process or to a newly focused secure field.
+        let deliveryTarget = focusedTextTarget()
+        let deliveryApplication = NSWorkspace.shared.frontmostApplication
+        let deliveryProcessIdentifier = deliveryApplication?.processIdentifier
+        guard Self.shouldPaste(
+            accessibilityTrusted: isAccessibilityTrusted,
+            currentState: deliveryTarget.state,
+            capturedTarget: target,
+            currentProcessIdentifier: deliveryProcessIdentifier
+        ),
+        let destination = Self.keyboardPasteDestination(
+            capturedTarget: target,
+            currentProcessIdentifier: deliveryProcessIdentifier
+        ) else {
+            LocalFlowLogger.log(
+                "Keyboard paste skipped after focus changed; transcript retained on clipboard"
+            )
+            return .copiedToClipboard
+        }
+        let metricsBeforePaste = textMetrics(for: deliveryTarget.element)
+
         do {
-            try sendPasteKeystroke()
+            try await sendPasteKeystroke(to: destination)
         } catch {
             LocalFlowLogger.log(
                 "Keyboard paste event failed; transcript remains on clipboard error=\(error.localizedDescription)"
@@ -143,30 +180,55 @@ final class TextInsertionService {
             return .copiedToClipboard
         }
 
-        // A posted CGEvent has no success result. Confirm native text targets
-        // from their character count before claiming `.pasted` or restoring the
-        // previous clipboard. If confirmation is impossible (common in Electron),
-        // retain the transcript on the clipboard as a lossless fallback.
-        try? await Task.sleep(for: .milliseconds(90))
+        // Native controls expose enough AX metrics to confirm the text delta.
+        // Electron and Chromium often expose neither metric even after a
+        // PID-targeted event was posted. That is unavailable evidence, not a
+        // failed delivery, so retain the transcript without falsely reporting
+        // that it was only copied.
+        try? await Task.sleep(for: .milliseconds(100))
         let focusedAfterPaste = focusedTextTarget()
-        let pasteWasConfirmed = focusMatches(
-            captured: currentTarget.element,
+        let focusStillMatches = focusMatches(
+            captured: deliveryTarget.element,
             current: focusedAfterPaste.element
-        ) && textMetricsConfirmInsertion(
-            before: metricsBeforePaste,
-            after: textMetrics(for: focusedAfterPaste.element),
-            insertedText: text
+        )
+        let metricsAfterPaste = textMetrics(for: focusedAfterPaste.element)
+        let expectedCharacterDelta = metricsBeforePaste.map {
+            text.utf16.count - $0.selectedCharacterCount
+        }
+        let actualCharacterDelta: Int?
+        if let metricsBeforePaste, let metricsAfterPaste {
+            actualCharacterDelta = metricsAfterPaste.characterCount
+                - metricsBeforePaste.characterCount
+        } else {
+            actualCharacterDelta = nil
+        }
+        let confirmation = Self.keyboardPasteConfirmation(
+            focusStillMatches: focusStillMatches,
+            expectedCharacterDelta: expectedCharacterDelta,
+            actualCharacterDelta: actualCharacterDelta
+        )
+        let resolution = Self.keyboardPasteResolution(
+            destination: destination,
+            confirmation: confirmation
         )
 
-        guard pasteWasConfirmed else {
+        switch confirmation {
+        case .confirmed:
+            LocalFlowLogger.log("Keyboard paste confirmed via Accessibility metrics")
+        case .unavailable where resolution.outcome == .pasted:
+            LocalFlowLogger.log(
+                "Keyboard paste posted to captured process; Accessibility confirmation unavailable; transcript retained on clipboard"
+            )
+        case .unavailable, .mismatch:
             LocalFlowLogger.log(
                 "Keyboard paste unconfirmed; transcript retained on clipboard"
             )
-            return .copiedToClipboard
         }
 
-        guard restoreClipboard, let snapshot else {
-            return .pasted
+        guard resolution.shouldRestoreClipboard,
+              restoreClipboard,
+              let snapshot else {
+            return resolution.outcome
         }
 
         scheduleClipboardRestore(
@@ -175,7 +237,7 @@ final class TextInsertionService {
             insertedTextChangeCount: insertedTextChangeCount,
             delayMilliseconds: restoreDelayMilliseconds
         )
-        return .pasted
+        return resolution.outcome
     }
 
     private func scheduleClipboardRestore(
@@ -281,6 +343,69 @@ final class TextInsertionService {
         }
 
         return currentState == .editable
+    }
+
+    nonisolated static func keyboardPasteDestination(
+        capturedTarget: TextInsertionTarget?,
+        currentProcessIdentifier: pid_t?
+    ) -> KeyboardPasteDestination? {
+        guard let capturedTarget else {
+            return .session
+        }
+        guard let capturedProcessIdentifier = capturedTarget.processIdentifier else {
+            return nil
+        }
+        guard capturedProcessIdentifier == currentProcessIdentifier else {
+            return nil
+        }
+        return .capturedProcess(capturedProcessIdentifier)
+    }
+
+    nonisolated static func keyboardPasteConfirmation(
+        focusStillMatches: Bool,
+        expectedCharacterDelta: Int?,
+        actualCharacterDelta: Int?
+    ) -> KeyboardPasteConfirmation {
+        guard focusStillMatches else {
+            return .mismatch
+        }
+        guard let expectedCharacterDelta, let actualCharacterDelta else {
+            return .unavailable
+        }
+        return expectedCharacterDelta == actualCharacterDelta
+            ? .confirmed
+            : .mismatch
+    }
+
+    nonisolated static func keyboardPasteResolution(
+        destination: KeyboardPasteDestination,
+        confirmation: KeyboardPasteConfirmation
+    ) -> KeyboardPasteResolution {
+        switch confirmation {
+        case .confirmed:
+            return KeyboardPasteResolution(
+                outcome: .pasted,
+                shouldRestoreClipboard: true
+            )
+        case .unavailable:
+            switch destination {
+            case .capturedProcess:
+                return KeyboardPasteResolution(
+                    outcome: .pasted,
+                    shouldRestoreClipboard: false
+                )
+            case .session:
+                return KeyboardPasteResolution(
+                    outcome: .copiedToClipboard,
+                    shouldRestoreClipboard: false
+                )
+            }
+        case .mismatch:
+            return KeyboardPasteResolution(
+                outcome: .copiedToClipboard,
+                shouldRestoreClipboard: false
+            )
+        }
     }
 
     nonisolated private static func capturedApplicationIsStillActive(
@@ -493,19 +618,6 @@ final class TextInsertionService {
         )
     }
 
-    private func textMetricsConfirmInsertion(
-        before: TextMetrics?,
-        after: TextMetrics?,
-        insertedText: String
-    ) -> Bool {
-        guard let before, let after else {
-            return false
-        }
-        let expectedDelta = insertedText.utf16.count
-            - before.selectedCharacterCount
-        return after.characterCount - before.characterCount == expectedDelta
-    }
-
     private func restore(_ snapshot: ClipboardSnapshot, to pasteboard: NSPasteboard) {
         pasteboard.clearContents()
 
@@ -524,21 +636,40 @@ final class TextInsertionService {
         }
     }
 
-    private func sendPasteKeystroke() throws {
-        guard let source = CGEventSource(stateID: .hidSystemState) else {
+    private func sendPasteKeystroke(
+        to destination: KeyboardPasteDestination
+    ) async throws {
+        try Self.postPasteEvent(keyDown: true, to: destination)
+        // Some Chromium/Electron editors miss an effectively simultaneous
+        // down/up pair. Keep the chord short but observable by their event loop.
+        try? await Task.sleep(for: .milliseconds(12))
+        try Self.postPasteEvent(keyDown: false, to: destination)
+    }
+
+    nonisolated private static func postPasteEvent(
+        keyDown: Bool,
+        to destination: KeyboardPasteDestination
+    ) throws {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
             throw TextInsertionError.pasteEventCreationFailed
         }
         let keyCode: CGKeyCode = 9 // v
 
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+        guard let event = CGEvent(
+            keyboardEventSource: source,
+            virtualKey: keyCode,
+            keyDown: keyDown
+        ) else {
             throw TextInsertionError.pasteEventCreationFailed
         }
-        keyDown.flags = .maskCommand
-        keyUp.flags = .maskCommand
+        event.flags = .maskCommand
 
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        switch destination {
+        case let .capturedProcess(processIdentifier):
+            event.postToPid(processIdentifier)
+        case .session:
+            event.post(tap: .cgSessionEventTap)
+        }
     }
 
     private static let maximumClipboardSnapshotBytes = 8 * 1_024 * 1_024

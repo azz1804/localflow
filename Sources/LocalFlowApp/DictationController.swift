@@ -329,7 +329,7 @@ final class DictationController {
         }
 
         do {
-            let result = try audioRecorder.stop()
+            let result = try audioRecorder.stop(mode: .discard)
             removeTemporaryFile(result.fileURL)
             LocalFlowLogger.log(
                 "Recording cancelled duration=\(String(format: "%.2f", result.durationSeconds))"
@@ -633,13 +633,17 @@ final class DictationController {
 
             if job.stage == .recorded {
                 let audioURL = await pendingDictationStore.audioURL(for: job)
-                guard AudioRecordingValidator.hasReadableFrames(at: audioURL) else {
+                let validation = AudioRecordingValidator.validate(at: audioURL)
+                guard validation == .usable else {
+                    let reason = validation == .digitalSilence
+                        ? "silent-audio"
+                        : "invalid-audio"
                     try await pendingDictationStore.quarantine(
                         job,
-                        reason: "invalid-audio"
+                        reason: reason
                     )
                     LocalFlowLogger.log(
-                        "Pending job quarantined invalidAudio id=\(job.id)"
+                        "Pending job quarantined reason=\(reason) id=\(job.id)"
                     )
                     if shouldInsert {
                         setStatus(
@@ -655,8 +659,25 @@ final class DictationController {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    if !shouldInsert,
-                       Self.isPermanentPendingFailure(error) {
+                    if Self.isEmptyTranscription(error) {
+                        try await pendingDictationStore.quarantine(
+                            job,
+                            reason: "no-speech"
+                        )
+                        LocalFlowLogger.log(
+                            "Pending job quarantined after repeated empty transcriptions id=\(job.id)"
+                        )
+                        if shouldInsert {
+                            setStatus(
+                                .error(
+                                    "No speech was detected after multiple attempts. Please try again."
+                                )
+                            )
+                        }
+                        continue
+                    }
+
+                    if Self.isPermanentPendingFailure(error) {
                         try await pendingDictationStore.quarantine(
                             job,
                             reason: "permanent-transcription-error"
@@ -664,6 +685,13 @@ final class DictationController {
                         LocalFlowLogger.log(
                             "Pending job quarantined permanentError id=\(job.id) error=\(error.localizedDescription)"
                         )
+                        if shouldInsert {
+                            setStatus(
+                                .error(
+                                    error.localizedDescription
+                                )
+                            )
+                        }
                         continue
                     }
                     throw error
@@ -751,13 +779,42 @@ final class DictationController {
             language: parameters.transcriptionLanguage
         )
         let inferenceStartedAt = ProcessInfo.processInfo.systemUptime
-        job.transcribedText = try await client.transcribeAudio(
-            fileURL: optimizedUpload.fileURL,
-            model: parameters.transcriptionModel,
-            language: parameters.transcriptionLanguage,
-            prompt: prompt
-        )
-        try Task.checkCancellation()
+        while true {
+            do {
+                job.transcribedText = try await client.transcribeAudio(
+                    fileURL: optimizedUpload.fileURL,
+                    model: parameters.transcriptionModel,
+                    language: parameters.transcriptionLanguage,
+                    prompt: prompt
+                )
+                try Task.checkCancellation()
+                job.emptyTranscriptionResponseCount = nil
+                break
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard Self.isEmptyTranscription(error) else {
+                    throw error
+                }
+
+                let responseCount = (
+                    job.emptyTranscriptionResponseCount ?? 0
+                ) + 1
+                job.emptyTranscriptionResponseCount = responseCount
+                try await pendingDictationStore.save(job)
+                if responseCount
+                    >= Self.maximumEmptyTranscriptionResponses {
+                    throw error
+                }
+
+                LocalFlowLogger.log(
+                    "Empty transcription retry id=\(job.id) attempt=\(responseCount)"
+                )
+                try await Task.sleep(
+                    for: .milliseconds(250 * responseCount)
+                )
+            }
+        }
         job.stage = .transcribed
         try await pendingDictationStore.save(job)
         LocalFlowLogger.log(
@@ -934,6 +991,18 @@ final class DictationController {
             return false
         }
     }
+
+    private static func isEmptyTranscription(_ error: Error) -> Bool {
+        guard let error = error as? OpenAIClientError else {
+            return false
+        }
+        if case .emptyTranscription = error {
+            return true
+        }
+        return false
+    }
+
+    private static let maximumEmptyTranscriptionResponses = 3
 
     private func refreshRecordingStatus() {
         guard audioRecorder.isRecording, let recordingStartedAt else {

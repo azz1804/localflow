@@ -41,6 +41,7 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
     public var transcribedText: String?
     public var finalText: String?
     public var polished: Bool
+    public var emptyTranscriptionResponseCount: Int?
 
     public init(
         id: UUID = UUID(),
@@ -53,7 +54,8 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
         stage: Stage = .recorded,
         transcribedText: String? = nil,
         finalText: String? = nil,
-        polished: Bool = false
+        polished: Bool = false,
+        emptyTranscriptionResponseCount: Int? = nil
     ) {
         self.id = id
         self.recordID = recordID
@@ -70,6 +72,7 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
         self.transcribedText = transcribedText
         self.finalText = finalText
         self.polished = polished
+        self.emptyTranscriptionResponseCount = emptyTranscriptionResponseCount
     }
 
     public func makeHistoryRecord() -> DictationRecord? {

@@ -86,6 +86,6 @@ fi
 trap - EXIT
 
 if [[ "${LOCALFLOW_SKIP_LAUNCH:-0}" != "1" ]]; then
-  open "$DEST_APP"
+  open "$DEST_APP" --args --show-dashboard
 fi
 echo "$DEST_APP"

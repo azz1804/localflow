@@ -973,22 +973,22 @@ private final class AudioAnalysisWorker: @unchecked Sendable {
     }
 }
 
-/// The proven capture path: AVAudioFile accepts the exact buffer delivered by
-/// the input tap, including hardware-sized slices larger than the requested tap
-/// size. DSP remains off the realtime callback in AudioAnalysisWorker.
+/// The capture file adopts the exact format of the first buffer delivered by
+/// the input tap. The system can change its default input route between the
+/// time an engine is constructed and the time it starts (notably when a
+/// Bluetooth headset switches profile), so pre-creating the file from
+/// `input.outputFormat(forBus:)` can silently pair a 48 kHz tap with a stale
+/// 44.1 kHz file format.
 final class AudioCaptureSink: @unchecked Sendable {
-    private let audioFile: AVAudioFile
+    private let recordingURL: URL
     private let lock = NSLock()
+    private var audioFile: AVAudioFile?
     private var storedWriteError: Error?
     private var writtenFrameCount: AVAudioFramePosition = 0
+    private var isAcceptingBuffers = true
 
-    init(recordingURL: URL, format: AVAudioFormat) throws {
-        audioFile = try AVAudioFile(
-            forWriting: recordingURL,
-            settings: format.settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: format.isInterleaved
-        )
+    init(recordingURL: URL) {
+        self.recordingURL = recordingURL
     }
 
     func consume(_ buffer: AVAudioPCMBuffer) {
@@ -996,24 +996,48 @@ final class AudioCaptureSink: @unchecked Sendable {
             return
         }
 
+        lock.lock()
+        defer { lock.unlock() }
+        guard isAcceptingBuffers, storedWriteError == nil else {
+            return
+        }
+
         do {
-            try audioFile.write(from: buffer)
-            lock.lock()
-            writtenFrameCount += AVAudioFramePosition(buffer.frameLength)
-            lock.unlock()
-        } catch {
-            lock.lock()
-            if storedWriteError == nil {
-                storedWriteError = error
+            if audioFile == nil {
+                guard buffer.format.commonFormat == .pcmFormatFloat32,
+                      buffer.format.channelCount > 0,
+                      buffer.format.sampleRate > 0 else {
+                    throw AudioRecorderError.couldNotStart
+                }
+                audioFile = try AVAudioFile(
+                    forWriting: recordingURL,
+                    settings: buffer.format.settings,
+                    commonFormat: .pcmFormatFloat32,
+                    interleaved: buffer.format.isInterleaved
+                )
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: recordingURL.path
+                )
             }
-            lock.unlock()
+            guard let audioFile else {
+                throw AudioRecorderError.couldNotStart
+            }
+            try audioFile.write(from: buffer)
+            writtenFrameCount += AVAudioFramePosition(buffer.frameLength)
+        } catch {
+            storedWriteError = error
         }
     }
 
     func finish() throws {
         lock.lock()
+        isAcceptingBuffers = false
         let error = storedWriteError
         let frames = writtenFrameCount
+        // Releasing AVAudioFile finalizes its container before the caller
+        // validates or moves the recording.
+        audioFile = nil
         lock.unlock()
 
         if let error {
@@ -1031,6 +1055,7 @@ final class MicrophoneAudioCapture {
     private let accumulator = SignalAccumulator()
     private var captureSink: AudioCaptureSink?
     private var analysisWorker: AudioAnalysisWorker?
+    private var drainNode: AVAudioSinkNode?
     private var tapIsInstalled = false
     private var isRunning = false
 
@@ -1038,26 +1063,30 @@ final class MicrophoneAudioCapture {
         try? stop()
 
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.channelCount > 0,
-              format.sampleRate > 0,
-              format.commonFormat == .pcmFormatFloat32 else {
+        let currentFormat = input.outputFormat(forBus: 0)
+        guard currentFormat.channelCount > 0,
+              currentFormat.sampleRate > 0 else {
             throw AudioRecorderError.couldNotStart
         }
-
-        let captureSink = try AudioCaptureSink(
-            recordingURL: recordingURL,
-            format: format
-        )
+        let captureSink = AudioCaptureSink(recordingURL: recordingURL)
         let analysisWorker = AudioAnalysisWorker(accumulator: accumulator)
+        let drainNode = Self.makeDrainNode()
+
+        // A tap alone is not sufficient to pull live microphone samples on
+        // every macOS/device combination. Keep an explicit sink in the graph,
+        // while asking AVAudioEngine to negotiate both formats from the active
+        // route at start time.
+        engine.attach(drainNode)
+        engine.connect(input, to: drainNode, format: nil)
         analysisWorker.start()
         self.captureSink = captureSink
         self.analysisWorker = analysisWorker
+        self.drainNode = drainNode
 
         input.installTap(
             onBus: 0,
             bufferSize: 512,
-            format: format,
+            format: nil,
             block: Self.makeTapBlock(
                 captureSink: captureSink,
                 analysisWorker: analysisWorker
@@ -1072,10 +1101,14 @@ final class MicrophoneAudioCapture {
         } catch {
             input.removeTap(onBus: 0)
             tapIsInstalled = false
+            engine.disconnectNodeInput(drainNode)
+            engine.detach(drainNode)
             analysisWorker.stop()
             try? captureSink.finish()
             self.analysisWorker = nil
             self.captureSink = nil
+            self.drainNode = nil
+            engine.reset()
             throw error
         }
     }
@@ -1089,11 +1122,17 @@ final class MicrophoneAudioCapture {
             engine.inputNode.removeTap(onBus: 0)
             tapIsInstalled = false
         }
+        if let drainNode {
+            engine.disconnectNodeInput(drainNode)
+            engine.detach(drainNode)
+            self.drainNode = nil
+        }
         analysisWorker?.stop()
         analysisWorker = nil
 
         let captureSink = captureSink
         self.captureSink = nil
+        defer { engine.reset() }
         try captureSink?.finish()
     }
 
@@ -1109,5 +1148,9 @@ final class MicrophoneAudioCapture {
             captureSink.consume(buffer)
             analysisWorker.enqueue(buffer)
         }
+    }
+
+    private nonisolated static func makeDrainNode() -> AVAudioSinkNode {
+        AVAudioSinkNode { _, _, _ in noErr }
     }
 }

@@ -36,9 +36,11 @@ final class RecordingFrameDriver: NSObject {
         LocalFlowLogger.log("Recording frame driver using 60 Hz timer fallback")
     }
 
-    @objc
+    @objc nonisolated
     private func fallbackTimerDidFire(_ timer: Timer) {
-        callback()
+        AppKitMainThreadBridge.run {
+            callback()
+        }
     }
 
     func stop() {
@@ -88,10 +90,13 @@ private final class ScreenDisplayLinkDriver: NSObject {
         displayLink = nil
     }
 
-    @objc
+    @objc nonisolated
     private func displayLinkDidFire(_ displayLink: CADisplayLink) {
-        measureCadence(timestamp: displayLink.timestamp)
-        callback()
+        let callbackValue = AppKitCallbackValue(value: displayLink)
+        AppKitMainThreadBridge.run {
+            measureCadence(timestamp: callbackValue.value.timestamp)
+            callback()
+        }
     }
 
     private func measureCadence(timestamp: CFTimeInterval) {

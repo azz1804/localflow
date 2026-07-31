@@ -412,9 +412,11 @@ final class SettingsWindowController: NSWindowController {
         )
     }
 
-    @objc
+    @objc nonisolated
     private func applicationActivityDidChange(_ notification: Notification) {
-        refreshHubAnimationActivity()
+        AppKitMainThreadBridge.run {
+            refreshHubAnimationActivity()
+        }
     }
 
     private func refreshHubAnimationActivity() {
@@ -426,25 +428,35 @@ final class SettingsWindowController: NSWindowController {
 }
 
 extension SettingsWindowController: NSWindowDelegate {
-    func windowDidBecomeKey(_ notification: Notification) {
-        refreshHubAnimationActivity()
+    nonisolated func windowDidBecomeKey(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            refreshHubAnimationActivity()
+        }
     }
 
-    func windowDidResignKey(_ notification: Notification) {
-        refreshHubAnimationActivity()
+    nonisolated func windowDidResignKey(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            refreshHubAnimationActivity()
+        }
     }
 
-    func windowDidMiniaturize(_ notification: Notification) {
-        model.isHubAnimationActive = false
+    nonisolated func windowDidMiniaturize(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            model.isHubAnimationActive = false
+        }
     }
 
-    func windowDidDeminiaturize(_ notification: Notification) {
-        refreshHubAnimationActivity()
+    nonisolated func windowDidDeminiaturize(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            refreshHubAnimationActivity()
+        }
     }
 
-    func windowWillClose(_ notification: Notification) {
-        model.isHubAnimationActive = false
-        onWindowClosed?()
+    nonisolated func windowWillClose(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            model.isHubAnimationActive = false
+            onWindowClosed?()
+        }
     }
 }
 

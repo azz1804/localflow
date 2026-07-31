@@ -235,6 +235,135 @@ struct HotkeyPressGate: Equatable {
     }
 }
 
+private final class WeakHotkeyControllerReference: @unchecked Sendable {
+    weak var value: HotkeyController?
+
+    init(_ value: HotkeyController) {
+        self.value = value
+    }
+}
+
+/// Creates callbacks outside `HotkeyController`'s main-actor context.
+///
+/// AppKit and the legacy C input APIs invoke these function values directly.
+/// If a callback is formed inside a main-actor method, Swift can synthesize an
+/// executor check on the foreign entry thunk and crash before its body runs.
+/// These nonisolated factories keep the entry thunk neutral and cross onto the
+/// main actor only after the callback has begun executing.
+enum HotkeyForeignCallbackBridge {
+    nonisolated static func makeGlobalMonitorHandler(
+        controller: HotkeyController
+    ) -> (NSEvent) -> Void {
+        let reference = WeakHotkeyControllerReference(controller)
+        return { event in
+            guard let snapshot = HotkeyEventSnapshot(event: event) else {
+                return
+            }
+
+            Task { @MainActor [reference, snapshot] in
+                reference.value?.handleNSEventSnapshot(snapshot)
+            }
+        }
+    }
+
+    nonisolated static func makeLocalMonitorHandler(
+        controller: HotkeyController
+    ) -> (NSEvent) -> NSEvent? {
+        let reference = WeakHotkeyControllerReference(controller)
+        return { event in
+            guard let snapshot = HotkeyEventSnapshot(event: event) else {
+                return event
+            }
+
+            let shouldConsume = AppKitMainThreadBridge.run {
+                reference.value?.handleNSEventSnapshot(snapshot) ?? false
+            }
+            return shouldConsume ? nil : event
+        }
+    }
+
+    nonisolated static func makeEventTapCallback() -> CGEventTapCallBack {
+        { proxy, type, event, refcon in
+            guard let refcon else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            let controller = Unmanaged<HotkeyController>
+                .fromOpaque(refcon)
+                .takeUnretainedValue()
+            let callbackValue = AppKitCallbackValue(
+                value: (proxy: proxy, type: type, event: event)
+            )
+            return AppKitMainThreadBridge.run {
+                controller.handle(
+                    proxy: callbackValue.value.proxy,
+                    type: callbackValue.value.type,
+                    event: callbackValue.value.event
+                )
+            }
+        }
+    }
+
+    nonisolated static func makeHIDValueCallback() -> IOHIDValueCallback {
+        { _, _, refcon, value in
+            guard let refcon else {
+                return
+            }
+
+            let element = IOHIDValueGetElement(value)
+            let usagePage = Int(IOHIDElementGetUsagePage(element))
+            let usage = Int(IOHIDElementGetUsage(element))
+            let intValue = IOHIDValueGetIntegerValue(value)
+            let controller = Unmanaged<HotkeyController>
+                .fromOpaque(refcon)
+                .takeUnretainedValue()
+
+            Task { @MainActor in
+                controller.handleHIDValue(
+                    usagePage: usagePage,
+                    usage: usage,
+                    intValue: intValue
+                )
+            }
+        }
+    }
+
+    nonisolated static func makeCarbonCallback() -> EventHandlerUPP {
+        { _, event, userData in
+            guard let event, let userData else {
+                return noErr
+            }
+
+            var hotkeyID = EventHotKeyID()
+            let status = GetEventParameter(
+                event,
+                EventParamName(kEventParamDirectObject),
+                EventParamType(typeEventHotKeyID),
+                nil,
+                MemoryLayout<EventHotKeyID>.size,
+                nil,
+                &hotkeyID
+            )
+            guard status == noErr else {
+                return status
+            }
+
+            let controller = Unmanaged<HotkeyController>
+                .fromOpaque(userData)
+                .takeUnretainedValue()
+            let identifier = hotkeyID.id
+            let eventKind = GetEventKind(event)
+            Task { @MainActor in
+                controller.handleCarbonHotkey(
+                    id: identifier,
+                    eventKind: eventKind
+                )
+            }
+            return noErr
+        }
+    }
+}
+
 @MainActor
 final class HotkeyController {
     var onHoldStart: (() -> Void)?
@@ -295,14 +424,7 @@ final class HotkeyController {
             | (1 << CGEventType.tapDisabledByTimeout.rawValue)
             | (1 << CGEventType.tapDisabledByUserInput.rawValue)
 
-        let callback: CGEventTapCallBack = { proxy, type, event, refcon in
-            guard let refcon else {
-                return Unmanaged.passUnretained(event)
-            }
-
-            let controller = Unmanaged<HotkeyController>.fromOpaque(refcon).takeUnretainedValue()
-            return controller.handle(proxy: proxy, type: type, event: event)
-        }
+        let callback = HotkeyForeignCallbackBridge.makeEventTapCallback()
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         for tapOption in [CGEventTapOptions.defaultTap, .listenOnly] {
@@ -412,27 +534,19 @@ final class HotkeyController {
     private func installNSEventMonitors() {
         let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .keyUp]
 
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
-            guard let snapshot = HotkeyEventSnapshot(event: event) else {
-                return
-            }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: mask,
+            handler: HotkeyForeignCallbackBridge.makeGlobalMonitorHandler(
+                controller: self
+            )
+        )
 
-            Task { @MainActor in
-                self?.handleNSEventSnapshot(snapshot)
-            }
-        }
-
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            guard let snapshot = HotkeyEventSnapshot(event: event) else {
-                return event
-            }
-
-            var shouldConsume = false
-            MainActor.assumeIsolated {
-                shouldConsume = self?.handleNSEventSnapshot(snapshot) ?? false
-            }
-            return shouldConsume ? nil : event
-        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: mask,
+            handler: HotkeyForeignCallbackBridge.makeLocalMonitorHandler(
+                controller: self
+            )
+        )
 
         monitorsAreInstalled = globalMonitor != nil || localMonitor != nil
     }
@@ -453,21 +567,7 @@ final class HotkeyController {
 
         IOHIDManagerSetDeviceMatchingMultiple(manager, matches)
 
-        let callback: IOHIDValueCallback = { _, _, refcon, value in
-            guard let refcon else {
-                return
-            }
-
-            let element = IOHIDValueGetElement(value)
-            let usagePage = Int(IOHIDElementGetUsagePage(element))
-            let usage = Int(IOHIDElementGetUsage(element))
-            let intValue = IOHIDValueGetIntegerValue(value)
-            let controller = Unmanaged<HotkeyController>.fromOpaque(refcon).takeUnretainedValue()
-
-            Task { @MainActor in
-                controller.handleHIDValue(usagePage: usagePage, usage: usage, intValue: intValue)
-            }
-        }
+        let callback = HotkeyForeignCallbackBridge.makeHIDValueCallback()
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterInputValueCallback(manager, callback, refcon)
@@ -499,32 +599,7 @@ final class HotkeyController {
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
         ]
 
-        let callback: EventHandlerUPP = { _, event, userData in
-            guard let event, let userData else {
-                return noErr
-            }
-
-            var hotkeyID = EventHotKeyID()
-            let status = GetEventParameter(
-                event,
-                EventParamName(kEventParamDirectObject),
-                EventParamType(typeEventHotKeyID),
-                nil,
-                MemoryLayout<EventHotKeyID>.size,
-                nil,
-                &hotkeyID
-            )
-            guard status == noErr else {
-                return status
-            }
-
-            let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
-            let eventKind = GetEventKind(event)
-            Task { @MainActor in
-                controller.handleCarbonHotkey(id: hotkeyID.id, eventKind: eventKind)
-            }
-            return noErr
-        }
+        let callback = HotkeyForeignCallbackBridge.makeCarbonCallback()
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let installStatus = InstallEventHandler(
@@ -567,7 +642,7 @@ final class HotkeyController {
         }
     }
 
-    private func handleHIDValue(usagePage: Int, usage: Int, intValue: Int) {
+    fileprivate func handleHIDValue(usagePage: Int, usage: Int, intValue: Int) {
         guard holdSpec?.key == .fn, Self.isFnHIDUsage(usagePage: usagePage, usage: usage) else {
             return
         }
@@ -597,7 +672,7 @@ final class HotkeyController {
         return false
     }
 
-    private func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    fileprivate func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
@@ -708,7 +783,7 @@ final class HotkeyController {
     }
 
     @discardableResult
-    private func handleNSEventSnapshot(_ snapshot: HotkeyEventSnapshot) -> Bool {
+    fileprivate func handleNSEventSnapshot(_ snapshot: HotkeyEventSnapshot) -> Bool {
         switch snapshot.kind {
         case .flagsChanged:
             return handleNSEventFlagsChanged(snapshot)
@@ -1040,7 +1115,7 @@ final class HotkeyController {
         onToggle?()
     }
 
-    private func handleCarbonHotkey(id: UInt32, eventKind: UInt32) {
+    fileprivate func handleCarbonHotkey(id: UInt32, eventKind: UInt32) {
         switch (id, eventKind) {
         case (Self.carbonFallbackHoldID, UInt32(kEventHotKeyPressed)):
             if !holdFallbackIsDown {

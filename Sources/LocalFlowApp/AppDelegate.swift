@@ -6,8 +6,13 @@ import ServiceManagement
 @MainActor
 enum AppLaunchPresentationPolicy {
     static func shouldOpenMainWindow(
-        userInfo: [AnyHashable: Any]?
+        userInfo: [AnyHashable: Any]?,
+        arguments: [String] = CommandLine.arguments
     ) -> Bool {
+        if arguments.contains("--show-dashboard") {
+            return true
+        }
+
         guard let value = userInfo?[NSApplication.launchIsDefaultUserInfoKey]
             as? NSNumber else {
             // Preserve the historical behavior on launchers that omit AppKit's
@@ -45,8 +50,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
     private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    nonisolated func applicationDidFinishLaunching(
+        _ notification: Notification
+    ) {
+        let callbackValue = AppKitCallbackValue(value: notification)
+        AppKitMainThreadBridge.run {
+            applicationDidFinishLaunchingOnMainActor(callbackValue.value)
+        }
+    }
+
+    private func applicationDidFinishLaunchingOnMainActor(
+        _ notification: Notification
+    ) {
         do {
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(showDashboardFromActivationSignal(_:)),
+                name: LocalFlowActivationSignal.showDashboard,
+                object: nil
+            )
             try loadRuntimeConfiguration()
             recoverOrphanedTemporaryAudio()
             LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") commit=\(Bundle.main.object(forInfoDictionaryKey: "LocalFlowGitCommit") as? String ?? "unknown") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
@@ -54,9 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             configureLaunchAtLogin()
             setupControllers()
             refreshPermissionMenuState()
-            if AppLaunchPresentationPolicy.shouldOpenMainWindow(
-                userInfo: notification.userInfo
-            ) {
+            let activationRequested = LocalFlowActivationSignal
+                .consumeDashboardRequest()
+            if activationRequested || AppLaunchPresentationPolicy
+                .shouldOpenMainWindow(userInfo: notification.userInfo) {
                 showMainWindow()
             } else {
                 LocalFlowLogger.log(
@@ -70,14 +93,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    nonisolated func applicationWillTerminate(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            applicationWillTerminateOnMainActor()
+        }
+    }
+
+    private func applicationWillTerminateOnMainActor() {
         LocalFlowLogger.log("Application will terminate")
+        DistributedNotificationCenter.default().removeObserver(
+            self,
+            name: LocalFlowActivationSignal.showDashboard,
+            object: nil
+        )
         accessibilityRetryTimer?.invalidate()
         hotkeyController?.stop()
         LocalFlowLogger.flush()
     }
 
-    func applicationShouldTerminate(
+    nonisolated func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        let callbackValue = AppKitCallbackValue(value: sender)
+        return AppKitMainThreadBridge.run {
+            applicationShouldTerminateOnMainActor(callbackValue.value)
+        }
+    }
+
+    private func applicationShouldTerminateOnMainActor(
         _ sender: NSApplication
     ) -> NSApplication.TerminateReply {
         guard !terminationPreparationIsInFlight else {
@@ -99,18 +142,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    func applicationShouldHandleReopen(
+    nonisolated func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
+        AppKitMainThreadBridge.run {
+            applicationShouldHandleReopenOnMainActor()
+        }
+    }
+
+    private func applicationShouldHandleReopenOnMainActor() -> Bool {
         showMainWindow()
         return true
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(
+    nonisolated func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {
-        false
+        AppKitMainThreadBridge.run {
+            applicationShouldTerminateAfterLastWindowClosedOnMainActor()
+        }
+    }
+
+    private func applicationShouldTerminateAfterLastWindowClosedOnMainActor() -> Bool {
+        return false
     }
 
     private func loadRuntimeConfiguration() throws {
@@ -482,7 +537,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    @objc private func toggleManualRecording() {
+    @objc nonisolated private func toggleManualRecording() {
+        AppKitMainThreadBridge.run {
+            toggleManualRecordingOnMainActor()
+        }
+    }
+
+    private func toggleManualRecordingOnMainActor() {
         guard let dictationController else {
             return
         }
@@ -494,7 +555,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePolish() {
+    @objc nonisolated private func togglePolish() {
+        AppKitMainThreadBridge.run {
+            togglePolishOnMainActor()
+        }
+    }
+
+    private func togglePolishOnMainActor() {
         guard let dictationController else {
             return
         }
@@ -504,11 +571,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         polishMenuItem.state = configuration.enablePolish ? .on : .off
     }
 
-    @objc private func showMainWindow() {
+    @objc nonisolated private func showMainWindow() {
+        AppKitMainThreadBridge.run {
+            showMainWindowOnMainActor()
+        }
+    }
+
+    private func showMainWindowOnMainActor() {
         presentMainWindow(selectHistory: false, selectHome: true)
     }
 
-    @objc private func showHistory() {
+    @objc nonisolated private func showDashboardFromActivationSignal(
+        _ notification: Notification
+    ) {
+        AppKitMainThreadBridge.run {
+            LocalFlowActivationSignal.consumeDashboardRequest()
+            showMainWindowOnMainActor()
+        }
+    }
+
+    @objc nonisolated private func showHistory() {
+        AppKitMainThreadBridge.run {
+            showHistoryOnMainActor()
+        }
+    }
+
+    private func showHistoryOnMainActor() {
         presentMainWindow(selectHistory: true)
     }
 
@@ -537,7 +625,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsWindowController = settingsWindowController
     }
 
-    @objc private func reloadConfiguration() {
+    @objc nonisolated private func reloadConfiguration() {
+        AppKitMainThreadBridge.run {
+            reloadConfigurationOnMainActor()
+        }
+    }
+
+    private func reloadConfigurationOnMainActor() {
         do {
             try loadRuntimeConfiguration()
             dictationController?.updateConfiguration(configuration, dictionary: dictionary)
@@ -549,11 +643,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func openSupportFolder() {
+    @objc nonisolated private func openSupportFolder() {
+        AppKitMainThreadBridge.run {
+            openSupportFolderOnMainActor()
+        }
+    }
+
+    private func openSupportFolderOnMainActor() {
         NSWorkspace.shared.open(appSupportURL)
     }
 
-    @objc private func openDiagnosticLog() {
+    @objc nonisolated private func openDiagnosticLog() {
+        AppKitMainThreadBridge.run {
+            openDiagnosticLogOnMainActor()
+        }
+    }
+
+    private func openDiagnosticLogOnMainActor() {
         let logURL = appSupportURL.appendingPathComponent("localflow.log")
         if FileManager.default.fileExists(atPath: logURL.path) {
             NSWorkspace.shared.open(logURL)
@@ -562,7 +668,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func requestAccessibilityPermission() {
+    @objc nonisolated private func requestAccessibilityPermission() {
+        AppKitMainThreadBridge.run {
+            requestAccessibilityPermissionOnMainActor()
+        }
+    }
+
+    private func requestAccessibilityPermissionOnMainActor() {
         if PermissionManager.isAccessibilityTrusted(prompt: false) {
             refreshPermissionMenuState()
             if hotkeyController?.isRunning != true {
@@ -575,7 +687,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleHotkeyRetryAfterPermissionPrompt()
     }
 
-    @objc private func requestInputMonitoringPermission() {
+    @objc nonisolated private func requestInputMonitoringPermission() {
+        AppKitMainThreadBridge.run {
+            requestInputMonitoringPermissionOnMainActor()
+        }
+    }
+
+    private func requestInputMonitoringPermissionOnMainActor() {
         if PermissionManager.isInputMonitoringTrusted() {
             refreshPermissionMenuState()
             if hotkeyController?.activeTapDescription == "none" {
@@ -589,11 +707,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleHotkeyRetryAfterPermissionPrompt()
     }
 
-    @objc private func retryHotkeys() {
+    @objc nonisolated private func retryHotkeys() {
+        AppKitMainThreadBridge.run {
+            retryHotkeysOnMainActor()
+        }
+    }
+
+    private func retryHotkeysOnMainActor() {
         restartHotkeys()
     }
 
-    @objc private func quit() {
+    @objc nonisolated private func quit() {
+        AppKitMainThreadBridge.run {
+            quitOnMainActor()
+        }
+    }
+
+    private func quitOnMainActor() {
         NSApplication.shared.terminate(nil)
     }
 
@@ -692,7 +822,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    @objc private func accessibilityRetryTimerFired(_ timer: Timer) {
+    @objc nonisolated private func accessibilityRetryTimerFired(
+        _ timer: Timer
+    ) {
+        let callbackValue = AppKitCallbackValue(value: timer)
+        AppKitMainThreadBridge.run {
+            accessibilityRetryTimerFiredOnMainActor(callbackValue.value)
+        }
+    }
+
+    private func accessibilityRetryTimerFiredOnMainActor(_ timer: Timer) {
         let accessibilityTrusted = PermissionManager.isAccessibilityTrusted(prompt: false)
         let inputMonitoringTrusted = PermissionManager.isInputMonitoringTrusted()
         refreshPermissionMenuState()
