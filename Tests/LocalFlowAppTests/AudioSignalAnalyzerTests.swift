@@ -156,6 +156,64 @@ final class AudioSignalAnalyzerTests: XCTestCase {
         XCTAssertEqual(captured, (0..<8).map { Float($0) / 8 })
     }
 
+    func testRealtimeBufferCopiesFirstChannelFromInterleavedRenderQuantum() {
+        var interleaved: [Float] = [
+            0.1, -0.9,
+            0.2, -0.8,
+            0.3, -0.7,
+            0.4, -0.6
+        ]
+        let realtimeBuffer = RealtimeAnalysisBuffer(
+            slotCount: 3,
+            frameCapacity: 8
+        )
+
+        interleaved.withUnsafeBufferPointer { samples in
+            realtimeBuffer.enqueue(
+                samples: samples.baseAddress!,
+                stride: 2,
+                frameCount: 4,
+                sampleRate: 48_000
+            )
+        }
+        interleaved = Array(repeating: -1, count: interleaved.count)
+
+        var captured: [Float] = []
+        realtimeBuffer.consumeLatest { samples, frameCount, sampleRate in
+            captured = Array(samples)
+            XCTAssertEqual(frameCount, 4)
+            XCTAssertEqual(sampleRate, 48_000)
+        }
+
+        XCTAssertEqual(captured, [0.1, 0.2, 0.3, 0.4])
+    }
+
+    func testRealtimeBufferDropsOlderRenderQuantaWithoutBacklog() {
+        let realtimeBuffer = RealtimeAnalysisBuffer(
+            slotCount: 4,
+            frameCapacity: 8
+        )
+
+        for value in [Float(0.1), 0.2, 0.3] {
+            let samples = Array(repeating: value, count: 4)
+            samples.withUnsafeBufferPointer { buffer in
+                realtimeBuffer.enqueue(
+                    samples: buffer.baseAddress!,
+                    stride: 1,
+                    frameCount: buffer.count,
+                    sampleRate: 44_100
+                )
+            }
+        }
+
+        var captured: [Float] = []
+        realtimeBuffer.consumeLatest { samples, _, _ in
+            captured = Array(samples)
+        }
+
+        XCTAssertEqual(captured, Array(repeating: 0.3, count: 4))
+    }
+
     func testSilenceProducesZeroGain() {
         let samples = Array(repeating: Float(0), count: 512)
 

@@ -817,13 +817,35 @@ final class RealtimeAnalysisBuffer: @unchecked Sendable {
             return
         }
 
-        let frameCount = min(Int(buffer.frameLength), slots[0].samples.count)
-        guard frameCount > 0 else {
-            return
-        }
         let stride = buffer.format.isInterleaved
             ? max(1, Int(buffer.format.channelCount))
             : 1
+        enqueue(
+            samples: source,
+            stride: stride,
+            frameCount: Int(buffer.frameLength),
+            sampleRate: buffer.format.sampleRate
+        )
+    }
+
+    /// Copies a render quantum into preallocated storage. This overload lets
+    /// the AVAudioSinkNode feed the visualizer at the CoreAudio render cadence
+    /// instead of waiting for the much larger input-tap buffers used by the
+    /// recording path.
+    func enqueue(
+        samples source: UnsafePointer<Float>,
+        stride: Int,
+        frameCount requestedFrameCount: Int,
+        sampleRate: Double
+    ) {
+        let safeStride = max(1, stride)
+        let frameCount = min(
+            requestedFrameCount,
+            slots[0].samples.count
+        )
+        guard frameCount > 0, sampleRate > 0 else {
+            return
+        }
 
         for offset in slots.indices {
             let index = (writeCursor + offset) % slots.count
@@ -837,11 +859,11 @@ final class RealtimeAnalysisBuffer: @unchecked Sendable {
             }
 
             for frame in 0..<frameCount {
-                slot.samples[frame] = source[frame * stride]
+                slot.samples[frame] = source[frame * safeStride]
             }
             nextSequence &+= 1
             slot.frameCount = frameCount
-            slot.sampleRate = buffer.format.sampleRate
+            slot.sampleRate = sampleRate
             slot.sequence = nextSequence
             slot.state.store(RealtimeSlotState.ready)
             writeCursor = (index + 1) % slots.count
@@ -943,11 +965,21 @@ private final class AudioAnalysisWorker: @unchecked Sendable {
         timer.resume()
     }
 
-    func enqueue(_ buffer: AVAudioPCMBuffer) {
+    func enqueue(
+        samples: UnsafePointer<Float>,
+        stride: Int,
+        frameCount: Int,
+        sampleRate: Double
+    ) {
         guard running.load() == 1 else {
             return
         }
-        realtimeBuffer.enqueue(buffer)
+        realtimeBuffer.enqueue(
+            samples: samples,
+            stride: stride,
+            frameCount: frameCount,
+            sampleRate: sampleRate
+        )
     }
 
     func stop() {
@@ -1070,7 +1102,11 @@ final class MicrophoneAudioCapture {
         }
         let captureSink = AudioCaptureSink(recordingURL: recordingURL)
         let analysisWorker = AudioAnalysisWorker(accumulator: accumulator)
-        let drainNode = Self.makeDrainNode()
+        let drainNode = Self.makeDrainNode(
+            analysisWorker: analysisWorker,
+            sampleRate: currentFormat.sampleRate,
+            isInterleaved: currentFormat.isInterleaved
+        )
 
         // A tap alone is not sufficient to pull live microphone samples on
         // every macOS/device combination. Keep an explicit sink in the graph,
@@ -1088,8 +1124,7 @@ final class MicrophoneAudioCapture {
             bufferSize: 512,
             format: nil,
             block: Self.makeTapBlock(
-                captureSink: captureSink,
-                analysisWorker: analysisWorker
+                captureSink: captureSink
             )
         )
         tapIsInstalled = true
@@ -1141,16 +1176,45 @@ final class MicrophoneAudioCapture {
     }
 
     private nonisolated static func makeTapBlock(
-        captureSink: AudioCaptureSink,
-        analysisWorker: AudioAnalysisWorker
+        captureSink: AudioCaptureSink
     ) -> AVAudioNodeTapBlock {
         { buffer, _ in
             captureSink.consume(buffer)
-            analysisWorker.enqueue(buffer)
         }
     }
 
-    private nonisolated static func makeDrainNode() -> AVAudioSinkNode {
-        AVAudioSinkNode { _, _, _ in noErr }
+    private nonisolated static func makeDrainNode(
+        analysisWorker: AudioAnalysisWorker,
+        sampleRate: Double,
+        isInterleaved: Bool
+    ) -> AVAudioSinkNode {
+        AVAudioSinkNode { _, frameCount, inputData in
+            let audioBuffer = inputData.pointee.mBuffers
+            guard let rawData = audioBuffer.mData else {
+                return noErr
+            }
+
+            let stride = isInterleaved
+                ? max(1, Int(audioBuffer.mNumberChannels))
+                : 1
+            let availableSampleCount = Int(audioBuffer.mDataByteSize)
+                / MemoryLayout<Float>.size
+            let availableFrameCount = availableSampleCount / stride
+            let safeFrameCount = min(
+                Int(frameCount),
+                availableFrameCount
+            )
+            guard safeFrameCount > 0 else {
+                return noErr
+            }
+
+            analysisWorker.enqueue(
+                samples: rawData.assumingMemoryBound(to: Float.self),
+                stride: stride,
+                frameCount: safeFrameCount,
+                sampleRate: sampleRate
+            )
+            return noErr
+        }
     }
 }
