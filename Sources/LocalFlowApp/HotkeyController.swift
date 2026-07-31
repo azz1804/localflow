@@ -602,6 +602,7 @@ final class HotkeyController {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
+            reconcileFnStateAfterTapRecovery()
             return Unmanaged.passUnretained(event)
         }
 
@@ -815,23 +816,68 @@ final class HotkeyController {
     private func scheduleFnHoldEnd(source: String) {
         pendingFnReleaseTask?.cancel()
         pendingFnReleaseTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(90))
+            // Fn is observed through both CGEvent and HID. Give transient source
+            // changes time to converge and keep polling instead of abandoning a
+            // release forever when one flag is briefly stale.
+            for attempt in 0..<20 {
+                try? await Task.sleep(for: .milliseconds(75))
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+
+                let cgIsDown = CGEventSource.flagsState(
+                    .combinedSessionState
+                ).contains(.maskSecondaryFn)
+                let hidIsDown = self.hidFnIsDown
+                guard Self.shouldFinishFnRelease(
+                    cgIsDown: cgIsDown,
+                    hidIsDown: hidIsDown,
+                    hidListenerIsRunning: self.hidListenerIsRunning,
+                    attempt: attempt
+                ) else {
+                    continue
+                }
+
+                self.pendingFnReleaseTask = nil
+                self.fnIsDown = false
+                self.hidFnIsDown = false
+                self.completeHoldEnd(source: source)
+                return
+            }
+
+            // A release event already reached us. If both global sources remain
+            // stale for 1.5 seconds, fail closed instead of leaving recording
+            // locked forever. A genuine new press cancels this task above.
             guard let self, !Task.isCancelled else {
                 return
             }
-
             self.pendingFnReleaseTask = nil
-            let fnIsStillDown = CGEventSource.flagsState(
-                .combinedSessionState
-            ).contains(.maskSecondaryFn)
-            guard !fnIsStillDown else {
-                return
-            }
-
             self.fnIsDown = false
             self.hidFnIsDown = false
-            self.completeHoldEnd(source: source)
+            LocalFlowLogger.log("Fn release reconciled after stale-source timeout")
+            self.completeHoldEnd(source: "\(source)-timeout")
         }
+    }
+
+    private func reconcileFnStateAfterTapRecovery() {
+        guard activeHoldSource?.hasPrefix("fn-") == true else {
+            return
+        }
+        scheduleFnHoldEnd(source: "fn-tap-recovery")
+    }
+
+    nonisolated static func shouldFinishFnRelease(
+        cgIsDown: Bool,
+        hidIsDown: Bool,
+        hidListenerIsRunning: Bool,
+        attempt: Int
+    ) -> Bool {
+        if !cgIsDown && (!hidListenerIsRunning || !hidIsDown) {
+            return true
+        }
+        // HID is the physical source of truth when available. Require several
+        // consecutive polling intervals before overriding a stale CG flag.
+        return hidListenerIsRunning && !hidIsDown && attempt >= 3
     }
 
     private func completeHoldEnd(source: String) {

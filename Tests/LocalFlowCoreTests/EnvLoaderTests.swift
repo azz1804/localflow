@@ -39,6 +39,18 @@ final class EnvLoaderTests: XCTestCase {
         XCTAssertEqual(configuration.orbThemeOverride, "solar-nova")
     }
 
+    func testNonPositiveHistoryRetentionUsesForeverWithoutAllowingNegatives() {
+        XCTAssertEqual(
+            AppConfiguration(env: ["HISTORY_RETENTION_DAYS": "0"]).historyRetentionDays,
+            0
+        )
+        XCTAssertEqual(
+            AppConfiguration(env: ["HISTORY_RETENTION_DAYS": "-30"]).historyRetentionDays,
+            0
+        )
+        XCTAssertEqual(AppConfiguration(historyRetentionDays: 0).historyRetentionDays, 0)
+    }
+
     func testConfigurationCanRoundTripThroughEnvFile() {
         let configuration = AppConfiguration(
             openAIAPIKey: "sk-test",

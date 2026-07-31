@@ -6,6 +6,7 @@ REF="${LOCALFLOW_REF:-main}"
 DEST_DIR="${LOCALFLOW_DEST_DIR:-/Applications}"
 SOURCE_DIR="${LOCALFLOW_SOURCE_DIR:-}"
 SKIP_API_KEY="${LOCALFLOW_SKIP_API_KEY:-0}"
+EXPECTED_SHA256="${LOCALFLOW_SHA256:-}"
 TEMP_DIR=""
 
 info() {
@@ -34,18 +35,33 @@ fi
 
 if [[ -z "$SOURCE_DIR" ]]; then
   command -v curl >/dev/null 2>&1 || fail "curl is required."
+  command -v git >/dev/null 2>&1 || fail "git is required."
   command -v tar >/dev/null 2>&1 || fail "tar is required."
 
   TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/localflow-install.XXXXXX")"
   SOURCE_DIR="$TEMP_DIR/source"
   ARCHIVE_PATH="$TEMP_DIR/localflow.tar.gz"
-  ARCHIVE_URL="https://github.com/$REPOSITORY/archive/refs/heads/$REF.tar.gz"
+  RESOLVED_REF="$REF"
+  if [[ ! "$REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    RESOLVED_REF="$(git ls-remote \
+      "https://github.com/$REPOSITORY.git" \
+      "refs/heads/$REF" | awk 'NR == 1 { print $1 }')"
+    [[ "$RESOLVED_REF" =~ ^[0-9a-fA-F]{40}$ ]] \
+      || fail "Could not resolve $REPOSITORY ref $REF to an immutable commit."
+  fi
+  ARCHIVE_URL="https://github.com/$REPOSITORY/archive/$RESOLVED_REF.tar.gz"
 
   mkdir -p "$SOURCE_DIR"
-  info "Downloading $REPOSITORY ($REF)…"
+  info "Downloading $REPOSITORY ($REF @ ${RESOLVED_REF:0:12})…"
   curl --fail --location --silent --show-error \
     --retry 3 --proto '=https' --tlsv1.2 \
     "$ARCHIVE_URL" --output "$ARCHIVE_PATH"
+
+  if [[ -n "$EXPECTED_SHA256" ]]; then
+    ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE_PATH" | awk '{ print $1 }')"
+    [[ "$ACTUAL_SHA256" == "$EXPECTED_SHA256" ]] \
+      || fail "Archive checksum mismatch."
+  fi
   tar -xzf "$ARCHIVE_PATH" -C "$SOURCE_DIR" --strip-components=1
 else
   SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"

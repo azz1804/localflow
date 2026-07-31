@@ -46,6 +46,33 @@ final class HotkeyControllerTests: XCTestCase {
         XCTAssertTrue(gate.begin(at: 21.6, isRepeat: false))
     }
 
+    func testFnReleaseWaitsForPhysicalHIDAndRecoversFromStaleCG() {
+        XCTAssertFalse(
+            HotkeyController.shouldFinishFnRelease(
+                cgIsDown: false,
+                hidIsDown: true,
+                hidListenerIsRunning: true,
+                attempt: 10
+            )
+        )
+        XCTAssertFalse(
+            HotkeyController.shouldFinishFnRelease(
+                cgIsDown: true,
+                hidIsDown: false,
+                hidListenerIsRunning: true,
+                attempt: 2
+            )
+        )
+        XCTAssertTrue(
+            HotkeyController.shouldFinishFnRelease(
+                cgIsDown: true,
+                hidIsDown: false,
+                hidListenerIsRunning: true,
+                attempt: 3
+            )
+        )
+    }
+
     @MainActor
     func testEscapeCancelsAnActiveRecording() {
         XCTAssertTrue(

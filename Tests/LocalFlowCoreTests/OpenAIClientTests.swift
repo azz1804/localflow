@@ -156,6 +156,121 @@ final class OpenAIClientTests: XCTestCase {
         XCTAssertEqual(recordedDelays, [0.01, 0.02])
     }
 
+    func testTranscriptionUsesFileBackedUploadAndDecodesResponse() async throws {
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-openai-test-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        try Data(repeating: 0x42, count: 4_096).write(to: audioURL)
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        let script = ResponseScript([
+            .http(status: 200, body: #"{"text":"Bonjour LocalFlow"}"#, headers: [:])
+        ])
+        URLProtocolStub.install(script)
+        let client = makeClient(delays: DelayRecorder())
+
+        let result = try await client.transcribeAudio(
+            fileURL: audioURL,
+            model: "gpt-4o-transcribe",
+            language: "fr",
+            prompt: "LocalFlow"
+        )
+
+        XCTAssertEqual(result, "Bonjour LocalFlow")
+        XCTAssertEqual(script.requestCount, 1)
+        XCTAssertEqual(script.lastRequest?.timeoutInterval, 90)
+        XCTAssertTrue(
+            script.lastRequest?.value(forHTTPHeaderField: "Content-Type")?
+                .hasPrefix("multipart/form-data; boundary=") == true
+        )
+        XCTAssertNil(script.lastRequest?.httpBody)
+    }
+
+    func testTranscriptionRetriesFileBackedUpload() async throws {
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-upload-retry-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+        try Data(repeating: 0x24, count: 8_192).write(to: audioURL)
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        let script = ResponseScript([
+            .http(status: 503, body: "unavailable", headers: [:]),
+            .http(status: 200, body: #"{"text":"Nouvel essai"}"#, headers: [:])
+        ])
+        URLProtocolStub.install(script)
+        let delays = DelayRecorder()
+        let client = makeClient(delays: delays)
+
+        let result = try await client.transcribeAudio(
+            fileURL: audioURL,
+            model: "gpt-4o-transcribe",
+            language: "fr",
+            prompt: ""
+        )
+
+        XCTAssertEqual(result, "Nouvel essai")
+        XCTAssertEqual(script.requestCount, 2)
+        let recordedDelays = await delays.snapshot()
+        XCTAssertEqual(recordedDelays, [0.01])
+    }
+
+    func testTranscriptionRejectsEmptyAudioBeforeNetworkRequest() async throws {
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-empty-test-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        try Data().write(to: audioURL)
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        let script = ResponseScript([])
+        URLProtocolStub.install(script)
+        let client = makeClient(delays: DelayRecorder())
+
+        do {
+            _ = try await client.transcribeAudio(
+                fileURL: audioURL,
+                model: "gpt-4o-transcribe",
+                language: "fr",
+                prompt: ""
+            )
+            XCTFail("An empty recording must be rejected")
+        } catch OpenAIClientError.audioFileEmpty {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(script.requestCount, 0)
+    }
+
+    func testTranscriptionRejectsOversizedAudioBeforeEncoding() async throws {
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-oversized-test-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        FileManager.default.createFile(atPath: audioURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: audioURL)
+        try handle.truncate(atOffset: 25 * 1_024 * 1_024 + 1)
+        try handle.close()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        let script = ResponseScript([])
+        URLProtocolStub.install(script)
+        let client = makeClient(delays: DelayRecorder())
+
+        do {
+            _ = try await client.transcribeAudio(
+                fileURL: audioURL,
+                model: "gpt-4o-transcribe",
+                language: "fr",
+                prompt: ""
+            )
+            XCTFail("An oversized recording must be rejected")
+        } catch OpenAIClientError.audioFileTooLarge(let actual, let maximum) {
+            XCTAssertGreaterThan(actual, maximum)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(script.requestCount, 0)
+    }
+
     private func makeClient(delays: DelayRecorder) -> OpenAIClient {
         OpenAIClient(
             apiKey: "sk-test",
@@ -199,6 +314,7 @@ private final class ResponseScript: @unchecked Sendable {
     private let lock = NSLock()
     private var outcomes: [Outcome]
     private var requests = 0
+    private var receivedRequests: [URLRequest] = []
 
     init(_ outcomes: [Outcome]) {
         self.outcomes = outcomes
@@ -210,11 +326,18 @@ private final class ResponseScript: @unchecked Sendable {
         return requests
     }
 
-    func next() -> Outcome {
+    var lastRequest: URLRequest? {
+        lock.lock()
+        defer { lock.unlock() }
+        return receivedRequests.last
+    }
+
+    func next(request: URLRequest) -> Outcome {
         lock.lock()
         defer { lock.unlock() }
 
         requests += 1
+        receivedRequests.append(request)
         guard !outcomes.isEmpty else {
             return .failure(URLError(.badServerResponse))
         }
@@ -250,7 +373,7 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
             return
         }
 
-        switch script.next() {
+        switch script.next(request: request) {
         case .failure(let error):
             client?.urlProtocol(self, didFailWithError: error)
         case .http(let status, let body, let headers):

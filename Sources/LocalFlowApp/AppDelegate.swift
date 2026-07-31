@@ -4,6 +4,21 @@ import LocalFlowCore
 import ServiceManagement
 
 @MainActor
+enum AppLaunchPresentationPolicy {
+    static func shouldOpenMainWindow(
+        userInfo: [AnyHashable: Any]?
+    ) -> Bool {
+        guard let value = userInfo?[NSApplication.launchIsDefaultUserInfoKey]
+            as? NSNumber else {
+            // Preserve the historical behavior on launchers that omit AppKit's
+            // hint, while allowing login/restoration launches to stay quiet.
+            return true
+        }
+        return value.boolValue
+    }
+}
+
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var configuration = AppConfiguration()
     private var dictionary = PersonalDictionary.empty
@@ -21,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accessibilityRetryTimer: Timer?
     private var permissionRetryBaseline: (accessibility: Bool, inputMonitoring: Bool)?
     private var hotkeyRestartCoordinator = HotkeyRestartCoordinator()
+    private var terminationPreparationIsInFlight = false
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
@@ -32,12 +48,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             try loadRuntimeConfiguration()
-            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
+            recoverOrphanedTemporaryAudio()
+            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") commit=\(Bundle.main.object(forInfoDictionaryKey: "LocalFlowGitCommit") as? String ?? "unknown") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
             setupMenuBar()
             configureLaunchAtLogin()
             setupControllers()
             refreshPermissionMenuState()
-            showMainWindow()
+            if AppLaunchPresentationPolicy.shouldOpenMainWindow(
+                userInfo: notification.userInfo
+            ) {
+                showMainWindow()
+            } else {
+                LocalFlowLogger.log(
+                    "Background launch; dashboard remains closed"
+                )
+            }
         } catch {
             setupMenuBar()
             configureLaunchAtLogin()
@@ -49,6 +74,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LocalFlowLogger.log("Application will terminate")
         accessibilityRetryTimer?.invalidate()
         hotkeyController?.stop()
+        LocalFlowLogger.flush()
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard !terminationPreparationIsInFlight else {
+            return .terminateLater
+        }
+        guard let dictationController,
+              dictationController.canCancelRecording else {
+            LocalFlowLogger.flush()
+            return .terminateNow
+        }
+
+        terminationPreparationIsInFlight = true
+        Task { @MainActor [weak self, weak sender] in
+            await dictationController.prepareForTermination()
+            LocalFlowLogger.flush()
+            self?.terminationPreparationIsInFlight = false
+            sender?.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationShouldHandleReopen(
@@ -74,9 +122,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var loadedEnv = ProcessInfo.processInfo.environment
 
         for candidate in envCandidates where FileManager.default.fileExists(atPath: candidate.path) {
-            loadedEnv.merge(try EnvLoader.load(from: candidate)) { _, fileValue in fileValue }
-            envSourceURL = candidate
-            break
+            do {
+                loadedEnv.merge(try EnvLoader.load(from: candidate)) {
+                    _, fileValue in fileValue
+                }
+                envSourceURL = candidate
+                break
+            } catch {
+                LocalFlowLogger.log(
+                    "Configuration candidate skipped file=\(candidate.lastPathComponent) error=\(error.localizedDescription)"
+                )
+            }
         }
 
         configuration = AppConfiguration(env: loadedEnv)
@@ -97,8 +153,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let historyStore = HistoryStore(url: historyURL)
-        try historyStore.prune(retentionDays: configuration.historyRetentionDays)
-        historyRecordsCache = try historyStore.load(limit: 500)
+        do {
+            try historyStore.prune(
+                retentionDays: configuration.historyRetentionDays
+            )
+            historyRecordsCache = try historyStore.load()
+        } catch {
+            // History is valuable but must not prevent recording/hotkeys from
+            // starting. Durable jobs will retry their append when storage heals.
+            historyRecordsCache = []
+            LocalFlowLogger.log(
+                "History startup degraded error=\(error.localizedDescription)"
+            )
+        }
     }
 
     private func setupControllers() {
@@ -171,6 +238,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 status: .error("Enable Input Monitoring for Fn. Option+Space can be used meanwhile.")
             )
             requestInputMonitoringPermission()
+        }
+
+        dictationController.resumePendingDictations()
+    }
+
+    private func recoverOrphanedTemporaryAudio() {
+        let fileManager = FileManager.default
+        let temporaryDirectory = fileManager.temporaryDirectory
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: temporaryDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let orphanedFiles = files.filter { url in
+            let name = url.lastPathComponent
+            return name.hasPrefix("LocalFlow-") && url.pathExtension == "wav"
+                || name.hasPrefix("LocalFlow-upload-") && url.pathExtension == "m4a"
+        }
+        guard !orphanedFiles.isEmpty else {
+            return
+        }
+
+        let recoveryDirectory = appSupportURL.appendingPathComponent(
+            "recovered-audio",
+            isDirectory: true
+        )
+        try? fileManager.createDirectory(
+            at: recoveryDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        for sourceURL in orphanedFiles {
+            let modificationDate = try? sourceURL.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate
+            guard modificationDate?.timeIntervalSinceNow ?? -1 < -30 else {
+                continue
+            }
+            let destinationURL = recoveryDirectory
+                .appendingPathComponent("orphan-\(UUID().uuidString)")
+                .appendingPathExtension(sourceURL.pathExtension)
+            do {
+                try fileManager.moveItem(at: sourceURL, to: destinationURL)
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: destinationURL.path
+                )
+                LocalFlowLogger.log(
+                    "Recovered orphan audio path=\(destinationURL.lastPathComponent)"
+                )
+            } catch {
+                LocalFlowLogger.log(
+                    "Orphan audio recovery failed file=\(sourceURL.lastPathComponent) error=\(error.localizedDescription)"
+                )
+            }
         }
     }
 
@@ -601,7 +727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.configuration = updatedConfiguration
                 let historyStore = HistoryStore(url: self.historyURL)
                 try historyStore.prune(retentionDays: updatedConfiguration.historyRetentionDays)
-                self.historyRecordsCache = try historyStore.load(limit: 500)
+                self.historyRecordsCache = try historyStore.load()
                 self.refreshOrbProgression()
                 self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
                 self.restartHotkeys()
@@ -714,9 +840,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cacheHistoryRecord(_ record: DictationRecord) {
         historyRecordsCache.removeAll { $0.id == record.id }
         historyRecordsCache.insert(record, at: 0)
-        if historyRecordsCache.count > 500 {
-            historyRecordsCache.removeLast(historyRecordsCache.count - 500)
-        }
     }
 
     private func refreshOrbProgression() {

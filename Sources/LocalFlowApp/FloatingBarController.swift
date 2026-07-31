@@ -2,6 +2,35 @@ import AppKit
 import Foundation
 import QuartzCore
 
+/// Bridges synchronous AppKit callbacks into the view's main-actor state.
+///
+/// AppKit invokes these callbacks from its Objective-C main-thread run loop,
+/// which is not always registered as the Swift main-actor executor. Letting
+/// Swift synthesize an actor-checked Objective-C thunk can therefore crash
+/// before the callback body runs. AppKit guarantees these `NSView` callbacks
+/// are delivered on the main thread, so verify that invariant and then erase
+/// only the redundant executor check while keeping the implementation
+/// statically main-actor isolated.
+enum AppKitMainThreadBridge {
+    @available(*, noasync)
+    nonisolated static func run(
+        _ operation: @MainActor () -> Void
+    ) {
+        precondition(
+            Thread.isMainThread,
+            "AppKit view callback was delivered off the main thread"
+        )
+
+        withoutActuallyEscaping(operation) { isolatedOperation in
+            let mainThreadOperation = unsafeBitCast(
+                isolatedOperation,
+                to: (() -> Void).self
+            )
+            mainThreadOperation()
+        }
+    }
+}
+
 struct FloatingBarPalette: Equatable {
     var backgroundTop: OrbRGBA
     var backgroundBottom: OrbRGBA
@@ -755,46 +784,58 @@ final class FloatingBarView: NSView {
         }
     }
 
-    override func layout() {
-        super.layout()
-        updateAudioLayerGeometry()
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let trackingAreaReference {
-            removeTrackingArea(trackingAreaReference)
+    nonisolated override func layout() {
+        AppKitMainThreadBridge.run {
+            super.layout()
+            updateAudioLayerGeometry()
         }
-        let trackingArea = NSTrackingArea(
-            rect: cardRect,
-            options: [
-                .mouseEnteredAndExited,
-                .mouseMoved,
-                .activeAlways
-            ],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea)
-        trackingAreaReference = trackingArea
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        updateHoverLocation(with: event)
-        setHovered(true)
+    nonisolated override func updateTrackingAreas() {
+        AppKitMainThreadBridge.run {
+            super.updateTrackingAreas()
+
+            if let trackingAreaReference {
+                removeTrackingArea(trackingAreaReference)
+            }
+            let trackingArea = NSTrackingArea(
+                rect: cardRect,
+                options: [
+                    .mouseEnteredAndExited,
+                    .mouseMoved,
+                    .activeAlways
+                ],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(trackingArea)
+            trackingAreaReference = trackingArea
+        }
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        updateHoverLocation(with: event)
+    nonisolated override func mouseEntered(with event: NSEvent) {
+        let locationInWindow = event.locationInWindow
+        AppKitMainThreadBridge.run {
+            updateHoverLocation(locationInWindow: locationInWindow)
+            setHovered(true)
+        }
     }
 
-    override func mouseExited(with event: NSEvent) {
-        setHovered(false)
+    nonisolated override func mouseMoved(with event: NSEvent) {
+        let locationInWindow = event.locationInWindow
+        AppKitMainThreadBridge.run {
+            updateHoverLocation(locationInWindow: locationInWindow)
+        }
     }
 
-    private func updateHoverLocation(with event: NSEvent) {
-        hoverLocation = convert(event.locationInWindow, from: nil)
+    nonisolated override func mouseExited(with event: NSEvent) {
+        AppKitMainThreadBridge.run {
+            setHovered(false)
+        }
+    }
+
+    private func updateHoverLocation(locationInWindow: NSPoint) {
+        hoverLocation = convert(locationInWindow, from: nil)
         needsDisplay = true
     }
 
@@ -1093,24 +1134,26 @@ final class FloatingBarView: NSView {
             )
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        drawCard()
+    nonisolated override func draw(_ dirtyRect: NSRect) {
+        AppKitMainThreadBridge.run {
+            super.draw(dirtyRect)
+            drawCard()
 
-        switch status {
-        case .recording:
-            drawRecordingState()
-        case .processing:
-            break
-        case .done:
-            drawSymbolState(name: "checkmark", color: .systemGreen)
-        case .error:
-            drawSymbolState(
-                name: "exclamationmark",
-                color: .systemOrange
-            )
-        case .idle:
-            break
+            switch status {
+            case .recording:
+                drawRecordingState()
+            case .processing:
+                break
+            case .done:
+                drawSymbolState(name: "checkmark", color: .systemGreen)
+            case .error:
+                drawSymbolState(
+                    name: "exclamationmark",
+                    color: .systemOrange
+                )
+            case .idle:
+                break
+            }
         }
     }
 

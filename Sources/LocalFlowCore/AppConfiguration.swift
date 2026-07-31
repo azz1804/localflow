@@ -32,7 +32,7 @@ public struct AppConfiguration: Equatable, Sendable {
         holdHotkey: String = "fn",
         fallbackHoldHotkey: String = "option+space",
         toggleHotkey: String = "fn+space",
-        historyRetentionDays: Int = 30,
+        historyRetentionDays: Int = 0,
         restoreClipboardAfterPaste: Bool = true,
         pasteRestoreDelayMilliseconds: Int = 900,
         orbThemeOverride: String = "automatic"
@@ -45,7 +45,7 @@ public struct AppConfiguration: Equatable, Sendable {
         self.holdHotkey = holdHotkey
         self.fallbackHoldHotkey = fallbackHoldHotkey
         self.toggleHotkey = toggleHotkey
-        self.historyRetentionDays = historyRetentionDays
+        self.historyRetentionDays = max(0, historyRetentionDays)
         self.restoreClipboardAfterPaste = restoreClipboardAfterPaste
         self.pasteRestoreDelayMilliseconds = pasteRestoreDelayMilliseconds
         self.orbThemeOverride = orbThemeOverride
@@ -61,7 +61,7 @@ public struct AppConfiguration: Equatable, Sendable {
             holdHotkey: env["HOLD_HOTKEY"]?.nonEmpty ?? "fn",
             fallbackHoldHotkey: env["FALLBACK_HOLD_HOTKEY"]?.nonEmpty ?? "option+space",
             toggleHotkey: env["TOGGLE_HOTKEY"]?.nonEmpty ?? "fn+space",
-            historyRetentionDays: Self.intValue(env["HISTORY_RETENTION_DAYS"], default: 30),
+            historyRetentionDays: Self.intValue(env["HISTORY_RETENTION_DAYS"], default: 0),
             restoreClipboardAfterPaste: Self.boolValue(env["RESTORE_CLIPBOARD_AFTER_PASTE"], default: true),
             pasteRestoreDelayMilliseconds: Self.intValue(env["PASTE_RESTORE_DELAY_MS"], default: 900),
             orbThemeOverride: env["ORB_THEME"]?.nonEmpty ?? "automatic"

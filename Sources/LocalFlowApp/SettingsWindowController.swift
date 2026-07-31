@@ -170,7 +170,7 @@ final class LocalFlowHubModel: ObservableObject {
     func saveSettings() {
         var updated = configuration
         updated.openAIAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.historyRetentionDays = max(1, updated.historyRetentionDays)
+        updated.historyRetentionDays = max(0, updated.historyRetentionDays)
         updated.pasteRestoreDelayMilliseconds = max(0, updated.pasteRestoreDelayMilliseconds)
         let validOrbThemeIDs = Set(
             OrbEvolution.themes.map(\.id) + ["automatic"]

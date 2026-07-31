@@ -28,6 +28,9 @@ public enum OpenAIClientError: Error, LocalizedError {
     case badStatus(Int, String)
     case emptyTranscription
     case emptyPolishResponse
+    case audioFileUnavailable
+    case audioFileEmpty
+    case audioFileTooLarge(actualBytes: Int64, maximumBytes: Int64)
 
     public var errorDescription: String? {
         switch self {
@@ -43,6 +46,12 @@ public enum OpenAIClientError: Error, LocalizedError {
             return "OpenAI returned an empty transcription."
         case .emptyPolishResponse:
             return "OpenAI returned an empty polish response."
+        case .audioFileUnavailable:
+            return "The audio recording is no longer available."
+        case .audioFileEmpty:
+            return "The audio recording is empty."
+        case let .audioFileTooLarge(actualBytes, maximumBytes):
+            return "The audio recording is too large to upload (\(actualBytes) bytes; maximum \(maximumBytes) bytes)."
         }
     }
 }
@@ -90,12 +99,21 @@ public final class OpenAIClient: @unchecked Sendable {
         language: String,
         prompt: String
     ) async throws -> String {
+        try Task.checkCancellation()
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OpenAIClientError.missingAPIKey
         }
 
         guard let url = URL(string: "https://api.openai.com/v1/audio/transcriptions") else {
             throw OpenAIClientError.invalidURL
+        }
+
+        let audioByteCount = try validatedAudioByteCount(fileURL)
+        guard audioByteCount <= Self.maximumAudioUploadByteCount else {
+            throw OpenAIClientError.audioFileTooLarge(
+                actualBytes: audioByteCount,
+                maximumBytes: Self.maximumAudioUploadByteCount
+            )
         }
 
         var multipart = MultipartFormData()
@@ -116,14 +134,39 @@ public final class OpenAIClient: @unchecked Sendable {
             mimeType: mimeType(for: fileURL)
         )
         multipart.finalize()
+        let finalizedMultipart = multipart
+        let multipartContentType = finalizedMultipart.contentType
+        let multipartContentLength = try finalizedMultipart.contentLength()
+
+        let multipartURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-multipart-\(UUID().uuidString)")
+            .appendingPathExtension("body")
+        defer { try? FileManager.default.removeItem(at: multipartURL) }
+
+        let encodingTask = Task.detached(priority: .utility) {
+            try finalizedMultipart.write(to: multipartURL)
+        }
+        try await withTaskCancellationHandler {
+            try await encodingTask.value
+        } onCancel: {
+            encodingTask.cancel()
+        }
+        try Task.checkCancellation()
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = Self.transcriptionRequestTimeout
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue(multipart.contentType, forHTTPHeaderField: "Content-Type")
-        request.httpBody = multipart.data
+        request.setValue(multipartContentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            String(multipartContentLength),
+            forHTTPHeaderField: "Content-Length"
+        )
 
-        let (data, response) = try await send(request)
+        let (data, response) = try await send(
+            request,
+            uploadFileURL: multipartURL
+        )
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(TranscriptionResponse.self, from: data)
@@ -136,6 +179,7 @@ public final class OpenAIClient: @unchecked Sendable {
     }
 
     public func polish(text: String, model: String, systemPrompt: String, userPrompt: String) async throws -> String {
+        try Task.checkCancellation()
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OpenAIClientError.missingAPIKey
         }
@@ -155,6 +199,7 @@ public final class OpenAIClient: @unchecked Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = Self.polishRequestTimeout
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
@@ -171,12 +216,23 @@ public final class OpenAIClient: @unchecked Sendable {
         return polishedText
     }
 
-    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    private func send(
+        _ request: URLRequest,
+        uploadFileURL: URL? = nil
+    ) async throws -> (Data, URLResponse) {
         for attempt in 1...retryPolicy.maxAttempts {
+            try Task.checkCancellation()
             let result: (Data, URLResponse)
 
             do {
-                result = try await session.data(for: request)
+                if let uploadFileURL {
+                    result = try await session.upload(
+                        for: request,
+                        fromFile: uploadFileURL
+                    )
+                } else {
+                    result = try await session.data(for: request)
+                }
             } catch {
                 guard attempt < retryPolicy.maxAttempts, isRetryableNetworkError(error) else {
                     throw error
@@ -256,9 +312,29 @@ public final class OpenAIClient: @unchecked Sendable {
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? "<non-UTF8 body>"
+            let bodyData = data.prefix(Self.maximumErrorBodyByteCount)
+            let body = String(data: bodyData, encoding: .utf8)
+                ?? "<non-UTF8 body>"
             throw OpenAIClientError.badStatus(httpResponse.statusCode, body)
         }
+    }
+
+    private func validatedAudioByteCount(_ fileURL: URL) throws -> Int64 {
+        let values: URLResourceValues
+        do {
+            values = try fileURL.resourceValues(
+                forKeys: [.isRegularFileKey, .fileSizeKey]
+            )
+        } catch {
+            throw OpenAIClientError.audioFileUnavailable
+        }
+        guard values.isRegularFile == true, let fileSize = values.fileSize else {
+            throw OpenAIClientError.audioFileUnavailable
+        }
+        guard fileSize > 0 else {
+            throw OpenAIClientError.audioFileEmpty
+        }
+        return Int64(fileSize)
     }
 
     private func mimeType(for fileURL: URL) -> String {
@@ -273,6 +349,11 @@ public final class OpenAIClient: @unchecked Sendable {
             return "application/octet-stream"
         }
     }
+
+    private static let maximumAudioUploadByteCount: Int64 = 25 * 1_024 * 1_024
+    private static let transcriptionRequestTimeout: TimeInterval = 90
+    private static let polishRequestTimeout: TimeInterval = 45
+    private static let maximumErrorBodyByteCount = 8 * 1_024
 }
 
 private struct TranscriptionResponse: Decodable {

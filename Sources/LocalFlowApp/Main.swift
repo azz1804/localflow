@@ -41,6 +41,19 @@ enum LocalFlowMain {
             return
         }
 
+        // A second instance would register duplicate global hotkeys and could
+        // concurrently append to the same history/pending stores. Bring the
+        // existing app forward instead.
+        if let bundleIdentifier = Bundle.main.bundleIdentifier,
+           let existingApplication = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first(where: {
+                $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+            }) {
+            existingApplication.activate(options: [.activateAllWindows])
+            return
+        }
+
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
@@ -66,6 +79,13 @@ enum LocalFlowMain {
                 _ = capture.currentFrame()
             }
             try capture.stop()
+            guard AudioRecordingValidator.hasReadableFrames(at: fileURL) else {
+                throw AudioRecorderError.recordingUnavailable
+            }
+            let byteCount = (
+                try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            ) ?? 0
+            print("LocalFlow audio probe passed bytes=\(byteCount)")
             try? FileManager.default.removeItem(at: fileURL)
         } catch {
             try? capture.stop()
