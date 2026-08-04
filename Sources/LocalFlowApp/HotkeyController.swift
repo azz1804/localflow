@@ -190,17 +190,21 @@ struct HotkeyEventSnapshot: Sendable {
         switch event.type {
         case .flagsChanged:
             kind = .flagsChanged
+            // AppKit raises NSInternalInconsistencyException when isARepeat is
+            // queried on a flagsChanged event. Fn emits this event type.
+            isRepeat = false
         case .keyDown:
             kind = .keyDown
+            isRepeat = event.isARepeat
         case .keyUp:
             kind = .keyUp
+            isRepeat = false
         default:
             return nil
         }
 
         keyCode = event.keyCode
         modifierFlagsRawValue = event.modifierFlags.rawValue
-        isRepeat = event.isARepeat
     }
 }
 
@@ -231,6 +235,135 @@ struct HotkeyPressGate: Equatable {
     }
 }
 
+private final class WeakHotkeyControllerReference: @unchecked Sendable {
+    weak var value: HotkeyController?
+
+    init(_ value: HotkeyController) {
+        self.value = value
+    }
+}
+
+/// Creates callbacks outside `HotkeyController`'s main-actor context.
+///
+/// AppKit and the legacy C input APIs invoke these function values directly.
+/// If a callback is formed inside a main-actor method, Swift can synthesize an
+/// executor check on the foreign entry thunk and crash before its body runs.
+/// These nonisolated factories keep the entry thunk neutral and cross onto the
+/// main actor only after the callback has begun executing.
+enum HotkeyForeignCallbackBridge {
+    nonisolated static func makeGlobalMonitorHandler(
+        controller: HotkeyController
+    ) -> (NSEvent) -> Void {
+        let reference = WeakHotkeyControllerReference(controller)
+        return { event in
+            guard let snapshot = HotkeyEventSnapshot(event: event) else {
+                return
+            }
+
+            Task { @MainActor [reference, snapshot] in
+                reference.value?.handleNSEventSnapshot(snapshot)
+            }
+        }
+    }
+
+    nonisolated static func makeLocalMonitorHandler(
+        controller: HotkeyController
+    ) -> (NSEvent) -> NSEvent? {
+        let reference = WeakHotkeyControllerReference(controller)
+        return { event in
+            guard let snapshot = HotkeyEventSnapshot(event: event) else {
+                return event
+            }
+
+            let shouldConsume = AppKitMainThreadBridge.run {
+                reference.value?.handleNSEventSnapshot(snapshot) ?? false
+            }
+            return shouldConsume ? nil : event
+        }
+    }
+
+    nonisolated static func makeEventTapCallback() -> CGEventTapCallBack {
+        { proxy, type, event, refcon in
+            guard let refcon else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            let controller = Unmanaged<HotkeyController>
+                .fromOpaque(refcon)
+                .takeUnretainedValue()
+            let callbackValue = AppKitCallbackValue(
+                value: (proxy: proxy, type: type, event: event)
+            )
+            return AppKitMainThreadBridge.run {
+                controller.handle(
+                    proxy: callbackValue.value.proxy,
+                    type: callbackValue.value.type,
+                    event: callbackValue.value.event
+                )
+            }
+        }
+    }
+
+    nonisolated static func makeHIDValueCallback() -> IOHIDValueCallback {
+        { _, _, refcon, value in
+            guard let refcon else {
+                return
+            }
+
+            let element = IOHIDValueGetElement(value)
+            let usagePage = Int(IOHIDElementGetUsagePage(element))
+            let usage = Int(IOHIDElementGetUsage(element))
+            let intValue = IOHIDValueGetIntegerValue(value)
+            let controller = Unmanaged<HotkeyController>
+                .fromOpaque(refcon)
+                .takeUnretainedValue()
+
+            Task { @MainActor in
+                controller.handleHIDValue(
+                    usagePage: usagePage,
+                    usage: usage,
+                    intValue: intValue
+                )
+            }
+        }
+    }
+
+    nonisolated static func makeCarbonCallback() -> EventHandlerUPP {
+        { _, event, userData in
+            guard let event, let userData else {
+                return noErr
+            }
+
+            var hotkeyID = EventHotKeyID()
+            let status = GetEventParameter(
+                event,
+                EventParamName(kEventParamDirectObject),
+                EventParamType(typeEventHotKeyID),
+                nil,
+                MemoryLayout<EventHotKeyID>.size,
+                nil,
+                &hotkeyID
+            )
+            guard status == noErr else {
+                return status
+            }
+
+            let controller = Unmanaged<HotkeyController>
+                .fromOpaque(userData)
+                .takeUnretainedValue()
+            let identifier = hotkeyID.id
+            let eventKind = GetEventKind(event)
+            Task { @MainActor in
+                controller.handleCarbonHotkey(
+                    id: identifier,
+                    eventKind: eventKind
+                )
+            }
+            return noErr
+        }
+    }
+}
+
 @MainActor
 final class HotkeyController {
     var onHoldStart: (() -> Void)?
@@ -239,6 +372,7 @@ final class HotkeyController {
     var onToggle: (() -> Void)?
     var onCancel: (() -> Void)?
     var onDiagnosticEvent: ((String) -> Void)?
+    var recordingCancellationIsAvailable: (() -> Bool)?
 
     private let holdSpec: HotkeySpec?
     private let fallbackHoldSpec: HotkeySpec?
@@ -261,6 +395,7 @@ final class HotkeyController {
     private var togglePressGate = HotkeyPressGate()
     private var toggleRecordingIsActive = false
     private var applicationRecordingIsActive = false
+    private var escapeCancellationIsInFlight = false
     private var lastToggleTime: CFTimeInterval = 0
     private(set) var isRunning = false
     private(set) var activeTapDescription = "none"
@@ -289,14 +424,7 @@ final class HotkeyController {
             | (1 << CGEventType.tapDisabledByTimeout.rawValue)
             | (1 << CGEventType.tapDisabledByUserInput.rawValue)
 
-        let callback: CGEventTapCallBack = { proxy, type, event, refcon in
-            guard let refcon else {
-                return Unmanaged.passUnretained(event)
-            }
-
-            let controller = Unmanaged<HotkeyController>.fromOpaque(refcon).takeUnretainedValue()
-            return controller.handle(proxy: proxy, type: type, event: event)
-        }
+        let callback = HotkeyForeignCallbackBridge.makeEventTapCallback()
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         for tapOption in [CGEventTapOptions.defaultTap, .listenOnly] {
@@ -384,16 +512,21 @@ final class HotkeyController {
         togglePressGate.end()
         toggleRecordingIsActive = false
         applicationRecordingIsActive = false
+        escapeCancellationIsInFlight = false
         lastToggleTime = 0
     }
 
     func setApplicationRecordingActive(_ isActive: Bool) {
+        if isActive != applicationRecordingIsActive {
+            escapeCancellationIsInFlight = false
+        }
         applicationRecordingIsActive = isActive
     }
 
     func clearToggleRecordingState() {
         toggleRecordingIsActive = false
         applicationRecordingIsActive = false
+        escapeCancellationIsInFlight = false
         activeHoldSource = nil
         cancelPendingHoldStart()
     }
@@ -401,27 +534,19 @@ final class HotkeyController {
     private func installNSEventMonitors() {
         let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .keyUp]
 
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
-            guard let snapshot = HotkeyEventSnapshot(event: event) else {
-                return
-            }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: mask,
+            handler: HotkeyForeignCallbackBridge.makeGlobalMonitorHandler(
+                controller: self
+            )
+        )
 
-            Task { @MainActor in
-                self?.handleNSEventSnapshot(snapshot)
-            }
-        }
-
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            guard let snapshot = HotkeyEventSnapshot(event: event) else {
-                return event
-            }
-
-            var shouldConsume = false
-            MainActor.assumeIsolated {
-                shouldConsume = self?.handleNSEventSnapshot(snapshot) ?? false
-            }
-            return shouldConsume ? nil : event
-        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: mask,
+            handler: HotkeyForeignCallbackBridge.makeLocalMonitorHandler(
+                controller: self
+            )
+        )
 
         monitorsAreInstalled = globalMonitor != nil || localMonitor != nil
     }
@@ -442,21 +567,7 @@ final class HotkeyController {
 
         IOHIDManagerSetDeviceMatchingMultiple(manager, matches)
 
-        let callback: IOHIDValueCallback = { _, _, refcon, value in
-            guard let refcon else {
-                return
-            }
-
-            let element = IOHIDValueGetElement(value)
-            let usagePage = Int(IOHIDElementGetUsagePage(element))
-            let usage = Int(IOHIDElementGetUsage(element))
-            let intValue = IOHIDValueGetIntegerValue(value)
-            let controller = Unmanaged<HotkeyController>.fromOpaque(refcon).takeUnretainedValue()
-
-            Task { @MainActor in
-                controller.handleHIDValue(usagePage: usagePage, usage: usage, intValue: intValue)
-            }
-        }
+        let callback = HotkeyForeignCallbackBridge.makeHIDValueCallback()
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterInputValueCallback(manager, callback, refcon)
@@ -488,32 +599,7 @@ final class HotkeyController {
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
         ]
 
-        let callback: EventHandlerUPP = { _, event, userData in
-            guard let event, let userData else {
-                return noErr
-            }
-
-            var hotkeyID = EventHotKeyID()
-            let status = GetEventParameter(
-                event,
-                EventParamName(kEventParamDirectObject),
-                EventParamType(typeEventHotKeyID),
-                nil,
-                MemoryLayout<EventHotKeyID>.size,
-                nil,
-                &hotkeyID
-            )
-            guard status == noErr else {
-                return status
-            }
-
-            let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
-            let eventKind = GetEventKind(event)
-            Task { @MainActor in
-                controller.handleCarbonHotkey(id: hotkeyID.id, eventKind: eventKind)
-            }
-            return noErr
-        }
+        let callback = HotkeyForeignCallbackBridge.makeCarbonCallback()
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let installStatus = InstallEventHandler(
@@ -556,7 +642,7 @@ final class HotkeyController {
         }
     }
 
-    private func handleHIDValue(usagePage: Int, usage: Int, intValue: Int) {
+    fileprivate func handleHIDValue(usagePage: Int, usage: Int, intValue: Int) {
         guard holdSpec?.key == .fn, Self.isFnHIDUsage(usagePage: usagePage, usage: usage) else {
             return
         }
@@ -586,11 +672,12 @@ final class HotkeyController {
         return false
     }
 
-    private func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    fileprivate func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
+            reconcileFnStateAfterTapRecovery()
             return Unmanaged.passUnretained(event)
         }
 
@@ -627,11 +714,11 @@ final class HotkeyController {
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
 
-        if Self.shouldCancelRecordingWithEscape(
+        if handleEscapeKeyDown(
             keyCode: keyCode,
             isRepeat: isRepeat,
-            recordingIsActive: escapeCanCancelRecording
-        ), cancelRecordingWithEscape(source: "escape-cg-key") {
+            source: "escape-cg-key"
+        ) {
             return nil
         }
 
@@ -696,7 +783,7 @@ final class HotkeyController {
     }
 
     @discardableResult
-    private func handleNSEventSnapshot(_ snapshot: HotkeyEventSnapshot) -> Bool {
+    fileprivate func handleNSEventSnapshot(_ snapshot: HotkeyEventSnapshot) -> Bool {
         switch snapshot.kind {
         case .flagsChanged:
             return handleNSEventFlagsChanged(snapshot)
@@ -729,12 +816,11 @@ final class HotkeyController {
             return false
         }
 
-        if Self.shouldCancelRecordingWithEscape(
+        if handleEscapeKeyDown(
             keyCode: snapshot.keyCode,
             isRepeat: snapshot.isRepeat,
-            recordingIsActive: escapeCanCancelRecording
-        ),
-           cancelRecordingWithEscape(source: "escape-nsevent-key") {
+            source: "escape-nsevent-key"
+        ) {
             return true
         }
 
@@ -805,23 +891,68 @@ final class HotkeyController {
     private func scheduleFnHoldEnd(source: String) {
         pendingFnReleaseTask?.cancel()
         pendingFnReleaseTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(90))
+            // Fn is observed through both CGEvent and HID. Give transient source
+            // changes time to converge and keep polling instead of abandoning a
+            // release forever when one flag is briefly stale.
+            for attempt in 0..<20 {
+                try? await Task.sleep(for: .milliseconds(75))
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+
+                let cgIsDown = CGEventSource.flagsState(
+                    .combinedSessionState
+                ).contains(.maskSecondaryFn)
+                let hidIsDown = self.hidFnIsDown
+                guard Self.shouldFinishFnRelease(
+                    cgIsDown: cgIsDown,
+                    hidIsDown: hidIsDown,
+                    hidListenerIsRunning: self.hidListenerIsRunning,
+                    attempt: attempt
+                ) else {
+                    continue
+                }
+
+                self.pendingFnReleaseTask = nil
+                self.fnIsDown = false
+                self.hidFnIsDown = false
+                self.completeHoldEnd(source: source)
+                return
+            }
+
+            // A release event already reached us. If both global sources remain
+            // stale for 1.5 seconds, fail closed instead of leaving recording
+            // locked forever. A genuine new press cancels this task above.
             guard let self, !Task.isCancelled else {
                 return
             }
-
             self.pendingFnReleaseTask = nil
-            let fnIsStillDown = CGEventSource.flagsState(
-                .combinedSessionState
-            ).contains(.maskSecondaryFn)
-            guard !fnIsStillDown else {
-                return
-            }
-
             self.fnIsDown = false
             self.hidFnIsDown = false
-            self.completeHoldEnd(source: source)
+            LocalFlowLogger.log("Fn release reconciled after stale-source timeout")
+            self.completeHoldEnd(source: "\(source)-timeout")
         }
+    }
+
+    private func reconcileFnStateAfterTapRecovery() {
+        guard activeHoldSource?.hasPrefix("fn-") == true else {
+            return
+        }
+        scheduleFnHoldEnd(source: "fn-tap-recovery")
+    }
+
+    nonisolated static func shouldFinishFnRelease(
+        cgIsDown: Bool,
+        hidIsDown: Bool,
+        hidListenerIsRunning: Bool,
+        attempt: Int
+    ) -> Bool {
+        if !cgIsDown && (!hidListenerIsRunning || !hidIsDown) {
+            return true
+        }
+        // HID is the physical source of truth when available. Require several
+        // consecutive polling intervals before overriding a stale CG flag.
+        return hidListenerIsRunning && !hidIsDown && attempt >= 3
     }
 
     private func completeHoldEnd(source: String) {
@@ -921,10 +1052,30 @@ final class HotkeyController {
     }
 
     private var escapeCanCancelRecording: Bool {
-        applicationRecordingIsActive
-            || toggleRecordingIsActive
-            || activeHoldSource != nil
-            || pendingHoldTask != nil
+        !escapeCancellationIsInFlight
+            && (
+                applicationRecordingIsActive
+                    || toggleRecordingIsActive
+                    || activeHoldSource != nil
+                    || pendingHoldTask != nil
+                    || recordingCancellationIsAvailable?() == true
+            )
+    }
+
+    @discardableResult
+    func handleEscapeKeyDown(
+        keyCode: UInt16,
+        isRepeat: Bool,
+        source: String
+    ) -> Bool {
+        guard Self.shouldCancelRecordingWithEscape(
+            keyCode: keyCode,
+            isRepeat: isRepeat,
+            recordingIsActive: escapeCanCancelRecording
+        ) else {
+            return false
+        }
+        return cancelRecordingWithEscape(source: source)
     }
 
     private func cancelRecordingWithEscape(source: String) -> Bool {
@@ -932,6 +1083,7 @@ final class HotkeyController {
             return false
         }
 
+        escapeCancellationIsInFlight = true
         toggleRecordingIsActive = false
         activeHoldSource = nil
         cancelPendingHoldStart()
@@ -963,7 +1115,7 @@ final class HotkeyController {
         onToggle?()
     }
 
-    private func handleCarbonHotkey(id: UInt32, eventKind: UInt32) {
+    fileprivate func handleCarbonHotkey(id: UInt32, eventKind: UInt32) {
         switch (id, eventKind) {
         case (Self.carbonFallbackHoldID, UInt32(kEventHotKeyPressed)):
             if !holdFallbackIsDown {

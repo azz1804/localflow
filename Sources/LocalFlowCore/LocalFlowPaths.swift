@@ -12,7 +12,15 @@ public enum LocalFlowPaths {
 
     public static func ensureAppSupportDirectory() throws -> URL {
         let directory = appSupportDirectory
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directory.path
+        )
         return directory
     }
 

@@ -3,6 +3,83 @@ import XCTest
 @testable import LocalFlowCore
 
 final class DictionaryTests: XCTestCase {
+    func testLoadSkipsCorruptCandidateAndUsesNextValidDictionary() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let corrupt = directory.appendingPathComponent("corrupt.json")
+        let valid = directory.appendingPathComponent("valid.json")
+        try Data("not-json".utf8).write(to: corrupt)
+        try JSONEncoder().encode(
+            PersonalDictionary(terms: ["LocalFlow"], replacements: [:])
+        ).write(to: valid)
+
+        let loaded = try DictionaryStore.load(candidates: [corrupt, valid])
+
+        XCTAssertEqual(loaded.sourceURL, valid)
+        XCTAssertEqual(loaded.dictionary.terms, ["LocalFlow"])
+    }
+
+    func testEnsureEditableDictionaryQuarantinesCorruptFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let dictionaryURL = directory.appendingPathComponent("dictionary.json")
+        try Data("broken".utf8).write(to: dictionaryURL)
+
+        let result = try DictionaryStore.ensureEditableDictionaryExists(
+            appSupportDirectory: directory,
+            fallback: PersonalDictionary(terms: ["Recovered"], replacements: [:])
+        )
+
+        XCTAssertEqual(result, dictionaryURL)
+        let decoded = try JSONDecoder().decode(
+            PersonalDictionary.self,
+            from: Data(contentsOf: result)
+        )
+        XCTAssertEqual(decoded.terms, ["Recovered"])
+        let recoveredFiles = try FileManager.default.contentsOfDirectory(
+            atPath: directory.path
+        ).filter { $0.hasPrefix("dictionary.corrupt-") }
+        XCTAssertEqual(recoveredFiles.count, 1)
+    }
+
+    func testEnsureEditableDictionaryMigratesExistingFilePermissions() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let dictionaryURL = directory.appendingPathComponent("dictionary.json")
+        try DictionaryStore.save(.empty, to: dictionaryURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: dictionaryURL.path
+        )
+
+        _ = try DictionaryStore.ensureEditableDictionaryExists(
+            appSupportDirectory: directory
+        )
+
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: dictionaryURL.path
+        )
+        XCTAssertEqual(
+            (attributes[FileAttributeKey.posixPermissions] as? NSNumber)?.intValue,
+            0o600
+        )
+    }
+
     func testDictionaryNormalizesTermsAndKeepsReplacements() {
         let dictionary = PersonalDictionary(
             terms: [" Codex ", "codex", "", "OpenAI"],

@@ -273,17 +273,17 @@ struct LocalFlowSettingsView: View {
                 ) {
                     HubSettingRow(
                         label: "History retention",
-                        help: "Number of days transcripts remain in local history."
+                        help: "Number of days transcripts remain in local history. Use 0 to keep them forever."
                     ) {
                         HStack(spacing: 7) {
                             TextField(
-                                "30",
+                                "0",
                                 value: $model.configuration.historyRetentionDays,
                                 format: .number
                             )
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 82)
-                            Text("days")
+                            Text(model.configuration.historyRetentionDays == 0 ? "forever" : "days")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                         }

@@ -4,6 +4,26 @@ import LocalFlowCore
 import ServiceManagement
 
 @MainActor
+enum AppLaunchPresentationPolicy {
+    static func shouldOpenMainWindow(
+        userInfo: [AnyHashable: Any]?,
+        arguments: [String] = CommandLine.arguments
+    ) -> Bool {
+        if arguments.contains("--show-dashboard") {
+            return true
+        }
+
+        guard let value = userInfo?[NSApplication.launchIsDefaultUserInfoKey]
+            as? NSNumber else {
+            // Preserve the historical behavior on launchers that omit AppKit's
+            // hint, while allowing login/restoration launches to stay quiet.
+            return true
+        }
+        return value.boolValue
+    }
+}
+
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var configuration = AppConfiguration()
     private var dictionary = PersonalDictionary.empty
@@ -11,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictionarySourceURL: URL?
     private var appSupportURL = LocalFlowPaths.appSupportDirectory
     private var historyURL = LocalFlowPaths.appSupportDirectory.appendingPathComponent("history.jsonl")
+    private var historyRecordsCache: [DictationRecord] = []
 
     private var statusItem: NSStatusItem?
     private var dictationController: DictationController?
@@ -19,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindowController: SettingsWindowController?
     private var accessibilityRetryTimer: Timer?
     private var permissionRetryBaseline: (accessibility: Bool, inputMonitoring: Bool)?
+    private var hotkeyRestartCoordinator = HotkeyRestartCoordinator()
+    private var terminationPreparationIsInFlight = false
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
@@ -27,15 +50,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
     private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    nonisolated func applicationDidFinishLaunching(
+        _ notification: Notification
+    ) {
+        let callbackValue = AppKitCallbackValue(value: notification)
+        AppKitMainThreadBridge.run {
+            applicationDidFinishLaunchingOnMainActor(callbackValue.value)
+        }
+    }
+
+    private func applicationDidFinishLaunchingOnMainActor(
+        _ notification: Notification
+    ) {
         do {
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(showDashboardFromActivationSignal(_:)),
+                name: LocalFlowActivationSignal.showDashboard,
+                object: nil
+            )
             try loadRuntimeConfiguration()
-            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
+            recoverOrphanedTemporaryAudio()
+            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") commit=\(Bundle.main.object(forInfoDictionaryKey: "LocalFlowGitCommit") as? String ?? "unknown") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
             setupMenuBar()
             configureLaunchAtLogin()
             setupControllers()
             refreshPermissionMenuState()
-            showMainWindow()
+            let activationRequested = LocalFlowActivationSignal
+                .consumeDashboardRequest()
+            if activationRequested || AppLaunchPresentationPolicy
+                .shouldOpenMainWindow(userInfo: notification.userInfo) {
+                showMainWindow()
+            } else {
+                LocalFlowLogger.log(
+                    "Background launch; dashboard remains closed"
+                )
+            }
         } catch {
             setupMenuBar()
             configureLaunchAtLogin()
@@ -43,23 +93,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        accessibilityRetryTimer?.invalidate()
-        hotkeyController?.stop()
+    nonisolated func applicationWillTerminate(_ notification: Notification) {
+        AppKitMainThreadBridge.run {
+            applicationWillTerminateOnMainActor()
+        }
     }
 
-    func applicationShouldHandleReopen(
+    private func applicationWillTerminateOnMainActor() {
+        LocalFlowLogger.log("Application will terminate")
+        DistributedNotificationCenter.default().removeObserver(
+            self,
+            name: LocalFlowActivationSignal.showDashboard,
+            object: nil
+        )
+        accessibilityRetryTimer?.invalidate()
+        hotkeyController?.stop()
+        LocalFlowLogger.flush()
+    }
+
+    nonisolated func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        let callbackValue = AppKitCallbackValue(value: sender)
+        return AppKitMainThreadBridge.run {
+            applicationShouldTerminateOnMainActor(callbackValue.value)
+        }
+    }
+
+    private func applicationShouldTerminateOnMainActor(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard !terminationPreparationIsInFlight else {
+            return .terminateLater
+        }
+        guard let dictationController,
+              dictationController.canCancelRecording else {
+            LocalFlowLogger.flush()
+            return .terminateNow
+        }
+
+        terminationPreparationIsInFlight = true
+        Task { @MainActor [weak self, weak sender] in
+            await dictationController.prepareForTermination()
+            LocalFlowLogger.flush()
+            self?.terminationPreparationIsInFlight = false
+            sender?.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    nonisolated func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
+        AppKitMainThreadBridge.run {
+            applicationShouldHandleReopenOnMainActor()
+        }
+    }
+
+    private func applicationShouldHandleReopenOnMainActor() -> Bool {
         showMainWindow()
         return true
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(
+    nonisolated func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {
-        false
+        AppKitMainThreadBridge.run {
+            applicationShouldTerminateAfterLastWindowClosedOnMainActor()
+        }
+    }
+
+    private func applicationShouldTerminateAfterLastWindowClosedOnMainActor() -> Bool {
+        return false
     }
 
     private func loadRuntimeConfiguration() throws {
@@ -71,9 +177,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var loadedEnv = ProcessInfo.processInfo.environment
 
         for candidate in envCandidates where FileManager.default.fileExists(atPath: candidate.path) {
-            loadedEnv.merge(try EnvLoader.load(from: candidate)) { _, fileValue in fileValue }
-            envSourceURL = candidate
-            break
+            do {
+                loadedEnv.merge(try EnvLoader.load(from: candidate)) {
+                    _, fileValue in fileValue
+                }
+                envSourceURL = candidate
+                break
+            } catch {
+                LocalFlowLogger.log(
+                    "Configuration candidate skipped file=\(candidate.lastPathComponent) error=\(error.localizedDescription)"
+                )
+            }
         }
 
         configuration = AppConfiguration(env: loadedEnv)
@@ -94,7 +208,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let historyStore = HistoryStore(url: historyURL)
-        try historyStore.prune(retentionDays: configuration.historyRetentionDays)
+        do {
+            try historyStore.prune(
+                retentionDays: configuration.historyRetentionDays
+            )
+            historyRecordsCache = try historyStore.load()
+        } catch {
+            // History is valuable but must not prevent recording/hotkeys from
+            // starting. Durable jobs will retry their append when storage heals.
+            historyRecordsCache = []
+            LocalFlowLogger.log(
+                "History startup degraded error=\(error.localizedDescription)"
+            )
+        }
     }
 
     private func setupControllers() {
@@ -117,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             self?.hotkeyController?.clearToggleRecordingState()
+            self?.performDeferredHotkeyRestartIfNeeded()
         }
         dictationController.onRecordingFrame = { [weak self] status, visualization in
             self?.floatingBarController?.update(
@@ -125,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         dictationController.onHistoryRecordCreated = { [weak self] record in
+            self?.cacheHistoryRecord(record)
             self?.settingsWindowController?.insertHistoryRecord(record)
             self?.refreshOrbProgression()
         }
@@ -138,24 +266,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleHotkey: configuration.toggleHotkey
         )
 
-        hotkeyController.onHoldStart = { [weak self] in
-            self?.dictationController?.beginHoldRecording()
-        }
-        hotkeyController.onHoldEnd = { [weak self] in
-            self?.dictationController?.endHoldRecording()
-        }
-        hotkeyController.onHoldLocked = { [weak self] in
-            self?.dictationController?.lockCurrentHoldRecording()
-        }
-        hotkeyController.onToggle = { [weak self] in
-            self?.dictationController?.toggleRecording()
-        }
-        hotkeyController.onCancel = { [weak self] in
-            self?.dictationController?.cancelRecording()
-        }
-        hotkeyController.onDiagnosticEvent = { [weak self] event in
-            self?.updateLastHotkey(event)
-        }
+        configureHotkeyCallbacks(
+            hotkeyController,
+            dictationController: dictationController
+        )
         let started = hotkeyController.start()
         LocalFlowLogger.log("Initial hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
 
@@ -180,6 +294,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             requestInputMonitoringPermission()
         }
+
+        dictationController.resumePendingDictations()
+    }
+
+    private func recoverOrphanedTemporaryAudio() {
+        let fileManager = FileManager.default
+        let temporaryDirectory = fileManager.temporaryDirectory
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: temporaryDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let orphanedFiles = files.filter { url in
+            let name = url.lastPathComponent
+            return name.hasPrefix("LocalFlow-") && url.pathExtension == "wav"
+                || name.hasPrefix("LocalFlow-upload-") && url.pathExtension == "m4a"
+        }
+        guard !orphanedFiles.isEmpty else {
+            return
+        }
+
+        let recoveryDirectory = appSupportURL.appendingPathComponent(
+            "recovered-audio",
+            isDirectory: true
+        )
+        try? fileManager.createDirectory(
+            at: recoveryDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        for sourceURL in orphanedFiles {
+            let modificationDate = try? sourceURL.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate
+            guard modificationDate?.timeIntervalSinceNow ?? -1 < -30 else {
+                continue
+            }
+            let destinationURL = recoveryDirectory
+                .appendingPathComponent("orphan-\(UUID().uuidString)")
+                .appendingPathExtension(sourceURL.pathExtension)
+            do {
+                try fileManager.moveItem(at: sourceURL, to: destinationURL)
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: destinationURL.path
+                )
+                LocalFlowLogger.log(
+                    "Recovered orphan audio path=\(destinationURL.lastPathComponent)"
+                )
+            } catch {
+                LocalFlowLogger.log(
+                    "Orphan audio recovery failed file=\(sourceURL.lastPathComponent) error=\(error.localizedDescription)"
+                )
+            }
+        }
     }
 
     private func setupMenuBar() {
@@ -190,28 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.behavior = []
         statusItem.isVisible = true
 
-        if let icon = NSImage(
-            systemSymbolName: "waveform.circle.fill",
-            accessibilityDescription: "LocalFlow"
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(
-                pointSize: 16,
-                weight: .semibold
-            )
-            .applying(
-                NSImage.SymbolConfiguration(
-                    paletteColors: [
-                        .white,
-                        NSColor(
-                            calibratedRed: 0.42,
-                            green: 0.3,
-                            blue: 0.96,
-                            alpha: 1
-                        )
-                    ]
-                )
-            )
-        ) {
+        if let icon = makeStatusItemIcon() {
             icon.isTemplate = false
             statusItem.button?.image = icon
             statusItem.button?.imagePosition = .imageOnly
@@ -231,6 +383,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let historyItem = NSMenuItem(
+            title: "Open History",
+            action: #selector(showHistory),
+            keyEquivalent: ""
+        )
+        historyItem.image = NSImage(
+            systemSymbolName: "clock.arrow.circlepath",
+            accessibilityDescription: "Open History"
+        )
+        historyItem.target = self
+        menu.addItem(historyItem)
+
         menu.addItem(.separator())
 
         startStopMenuItem.target = self
@@ -248,6 +412,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         self.statusItem = statusItem
+    }
+
+    private func makeStatusItemIcon() -> NSImage? {
+        if let url = Bundle.main.url(
+            forResource: "MenuBarOrb",
+            withExtension: "png"
+        ),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
+            image.accessibilityDescription = "LocalFlow"
+            return image
+        }
+
+        return NSImage(
+            systemSymbolName: "circle.hexagongrid.fill",
+            accessibilityDescription: "LocalFlow"
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(
+                pointSize: 16,
+                weight: .semibold
+            )
+        )
     }
 
     private func configureLaunchAtLogin() {
@@ -351,7 +537,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    @objc private func toggleManualRecording() {
+    @objc nonisolated private func toggleManualRecording() {
+        AppKitMainThreadBridge.run {
+            toggleManualRecordingOnMainActor()
+        }
+    }
+
+    private func toggleManualRecordingOnMainActor() {
         guard let dictationController else {
             return
         }
@@ -363,7 +555,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePolish() {
+    @objc nonisolated private func togglePolish() {
+        AppKitMainThreadBridge.run {
+            togglePolishOnMainActor()
+        }
+    }
+
+    private func togglePolishOnMainActor() {
         guard let dictationController else {
             return
         }
@@ -373,8 +571,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         polishMenuItem.state = configuration.enablePolish ? .on : .off
     }
 
-    @objc private func showMainWindow() {
+    @objc nonisolated private func showMainWindow() {
+        AppKitMainThreadBridge.run {
+            showMainWindowOnMainActor()
+        }
+    }
+
+    private func showMainWindowOnMainActor() {
         presentMainWindow(selectHistory: false, selectHome: true)
+    }
+
+    @objc nonisolated private func showDashboardFromActivationSignal(
+        _ notification: Notification
+    ) {
+        AppKitMainThreadBridge.run {
+            LocalFlowActivationSignal.consumeDashboardRequest()
+            showMainWindowOnMainActor()
+        }
+    }
+
+    @objc nonisolated private func showHistory() {
+        AppKitMainThreadBridge.run {
+            showHistoryOnMainActor()
+        }
+    }
+
+    private func showHistoryOnMainActor() {
+        presentMainWindow(selectHistory: true)
     }
 
     private func presentMainWindow(selectHistory: Bool, selectHome: Bool = false) {
@@ -402,7 +625,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsWindowController = settingsWindowController
     }
 
-    @objc private func reloadConfiguration() {
+    @objc nonisolated private func reloadConfiguration() {
+        AppKitMainThreadBridge.run {
+            reloadConfigurationOnMainActor()
+        }
+    }
+
+    private func reloadConfigurationOnMainActor() {
         do {
             try loadRuntimeConfiguration()
             dictationController?.updateConfiguration(configuration, dictionary: dictionary)
@@ -414,11 +643,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func openSupportFolder() {
+    @objc nonisolated private func openSupportFolder() {
+        AppKitMainThreadBridge.run {
+            openSupportFolderOnMainActor()
+        }
+    }
+
+    private func openSupportFolderOnMainActor() {
         NSWorkspace.shared.open(appSupportURL)
     }
 
-    @objc private func openDiagnosticLog() {
+    @objc nonisolated private func openDiagnosticLog() {
+        AppKitMainThreadBridge.run {
+            openDiagnosticLogOnMainActor()
+        }
+    }
+
+    private func openDiagnosticLogOnMainActor() {
         let logURL = appSupportURL.appendingPathComponent("localflow.log")
         if FileManager.default.fileExists(atPath: logURL.path) {
             NSWorkspace.shared.open(logURL)
@@ -427,7 +668,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func requestAccessibilityPermission() {
+    @objc nonisolated private func requestAccessibilityPermission() {
+        AppKitMainThreadBridge.run {
+            requestAccessibilityPermissionOnMainActor()
+        }
+    }
+
+    private func requestAccessibilityPermissionOnMainActor() {
         if PermissionManager.isAccessibilityTrusted(prompt: false) {
             refreshPermissionMenuState()
             if hotkeyController?.isRunning != true {
@@ -440,7 +687,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleHotkeyRetryAfterPermissionPrompt()
     }
 
-    @objc private func requestInputMonitoringPermission() {
+    @objc nonisolated private func requestInputMonitoringPermission() {
+        AppKitMainThreadBridge.run {
+            requestInputMonitoringPermissionOnMainActor()
+        }
+    }
+
+    private func requestInputMonitoringPermissionOnMainActor() {
         if PermissionManager.isInputMonitoringTrusted() {
             refreshPermissionMenuState()
             if hotkeyController?.activeTapDescription == "none" {
@@ -454,15 +707,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleHotkeyRetryAfterPermissionPrompt()
     }
 
-    @objc private func retryHotkeys() {
+    @objc nonisolated private func retryHotkeys() {
+        AppKitMainThreadBridge.run {
+            retryHotkeysOnMainActor()
+        }
+    }
+
+    private func retryHotkeysOnMainActor() {
         restartHotkeys()
     }
 
-    @objc private func quit() {
+    @objc nonisolated private func quit() {
+        AppKitMainThreadBridge.run {
+            quitOnMainActor()
+        }
+    }
+
+    private func quitOnMainActor() {
         NSApplication.shared.terminate(nil)
     }
 
-    private func restartHotkeys() {
+    private func restartHotkeys(reason: String = "requested") {
+        let recordingIsActive = dictationController?.canCancelRecording == true
+        guard hotkeyRestartCoordinator.requestRestart(
+            recordingIsActive: recordingIsActive
+        ) else {
+            LocalFlowLogger.log(
+                "Hotkey restart deferred reason=\(reason) recording=true"
+            )
+            return
+        }
+
+        performHotkeyRestart(reason: reason)
+    }
+
+    private func performHotkeyRestart(reason: String) {
         hotkeyController?.stop()
 
         let hotkeyController = HotkeyController(
@@ -470,6 +749,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fallbackHoldHotkey: configuration.fallbackHoldHotkey,
             toggleHotkey: configuration.toggleHotkey
         )
+        configureHotkeyCallbacks(
+            hotkeyController,
+            dictationController: dictationController
+        )
+        let started = hotkeyController.start()
+        hotkeyController.setApplicationRecordingActive(
+            dictationController?.canCancelRecording == true
+        )
+        self.hotkeyController = hotkeyController
+        LocalFlowLogger.log("Hotkey start reason=\(reason) started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
+        refreshPermissionMenuState()
+
+        if !started {
+            scheduleHotkeyRetryAfterPermissionPrompt()
+        }
+    }
+
+    private func configureHotkeyCallbacks(
+        _ hotkeyController: HotkeyController,
+        dictationController: DictationController?
+    ) {
         hotkeyController.onHoldStart = { [weak dictationController] in
             dictationController?.beginHoldRecording()
         }
@@ -485,16 +785,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyController.onCancel = { [weak dictationController] in
             dictationController?.cancelRecording()
         }
+        hotkeyController.recordingCancellationIsAvailable = {
+            [weak dictationController] in
+            dictationController?.canCancelRecording == true
+        }
         hotkeyController.onDiagnosticEvent = { [weak self] event in
             self?.updateLastHotkey(event)
         }
-        let started = hotkeyController.start()
-        self.hotkeyController = hotkeyController
-        LocalFlowLogger.log("Hotkey start started=\(started) tap=\(hotkeyController.activeTapDescription) monitors=\(hotkeyController.monitorsAreInstalled) carbon=\(hotkeyController.carbonHotkeysAreRegistered) hid=\(hotkeyController.hidListenerIsRunning) accessibilityTrusted=\(PermissionManager.isAccessibilityTrusted(prompt: false)) inputMonitoringTrusted=\(PermissionManager.isInputMonitoringTrusted())")
-        refreshPermissionMenuState()
+    }
 
-        if !started {
-            scheduleHotkeyRetryAfterPermissionPrompt()
+    private func performDeferredHotkeyRestartIfNeeded() {
+        guard hotkeyRestartCoordinator.consumeDeferredRestart(
+            recordingIsActive: dictationController?.canCancelRecording == true
+        ) else {
+            return
+        }
+
+        // Let the current key event finish before replacing its event tap.
+        Task { @MainActor [weak self] in
+            self?.restartHotkeys(reason: "deferred-after-recording")
         }
     }
 
@@ -513,7 +822,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    @objc private func accessibilityRetryTimerFired(_ timer: Timer) {
+    @objc nonisolated private func accessibilityRetryTimerFired(
+        _ timer: Timer
+    ) {
+        let callbackValue = AppKitCallbackValue(value: timer)
+        AppKitMainThreadBridge.run {
+            accessibilityRetryTimerFiredOnMainActor(callbackValue.value)
+        }
+    }
+
+    private func accessibilityRetryTimerFiredOnMainActor(_ timer: Timer) {
         let accessibilityTrusted = PermissionManager.isAccessibilityTrusted(prompt: false)
         let inputMonitoringTrusted = PermissionManager.isInputMonitoringTrusted()
         refreshPermissionMenuState()
@@ -546,7 +864,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try ConfigurationStore.save(updatedConfiguration, to: url)
                 self.envSourceURL = url
                 self.configuration = updatedConfiguration
-                try HistoryStore(url: self.historyURL).prune(retentionDays: updatedConfiguration.historyRetentionDays)
+                let historyStore = HistoryStore(url: self.historyURL)
+                try historyStore.prune(retentionDays: updatedConfiguration.historyRetentionDays)
+                self.historyRecordsCache = try historyStore.load()
                 self.refreshOrbProgression()
                 self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
                 self.restartHotkeys()
@@ -581,6 +901,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             do {
                 try HistoryStore(url: self.historyURL).clear()
+                self.historyRecordsCache = []
                 self.floatingBarController?.updateTotalWords(
                     0,
                     overrideID: self.configuration.orbThemeOverride
@@ -652,7 +973,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func loadHistoryRecords() -> [DictationRecord] {
-        (try? HistoryStore(url: historyURL).load(limit: 500)) ?? []
+        historyRecordsCache
+    }
+
+    private func cacheHistoryRecord(_ record: DictationRecord) {
+        historyRecordsCache.removeAll { $0.id == record.id }
+        historyRecordsCache.insert(record, at: 0)
     }
 
     private func refreshOrbProgression() {

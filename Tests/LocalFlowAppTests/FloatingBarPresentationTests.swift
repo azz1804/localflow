@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import LocalFlowApp
 
@@ -113,6 +114,82 @@ final class FloatingBarPresentationTests: XCTestCase {
                 pair.0.amplitude
             )
             XCTAssertGreaterThanOrEqual(pair.1.alpha, pair.0.alpha)
+        }
+    }
+
+    func testAppKitCallbacksEnterWithoutActorExecutorThunk() {
+        XCTAssertTrue(Thread.isMainThread)
+        AppKitMainThreadBridge.run {
+            let view = FloatingBarView(
+                frame: NSRect(
+                    origin: .zero,
+                    size: FloatingBarController.panelSize
+                )
+            )
+            let mouseEvent = NSEvent.mouseEvent(
+                with: .mouseMoved,
+                location: NSPoint(x: 24, y: 28),
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 0,
+                pressure: 0
+            )
+
+            XCTAssertNotNil(mouseEvent)
+
+            _ = view.perform(#selector(NSView.layout))
+            _ = view.perform(#selector(NSView.updateTrackingAreas))
+            XCTAssertEqual(view.trackingAreas.count, 1)
+
+            if let mouseEvent {
+                _ = view.perform(
+                    #selector(NSResponder.mouseEntered(with:)),
+                    with: mouseEvent
+                )
+                _ = view.perform(
+                    #selector(NSResponder.mouseMoved(with:)),
+                    with: mouseEvent
+                )
+                _ = view.perform(
+                    #selector(NSResponder.mouseExited(with:)),
+                    with: mouseEvent
+                )
+            }
+
+            let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(view.bounds.width),
+                pixelsHigh: Int(view.bounds.height),
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            )
+            XCTAssertNotNil(bitmap)
+
+            if let bitmap,
+               let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap) {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = graphicsContext
+                let selector = #selector(NSView.draw(_:))
+                typealias ObjectiveCDraw = @convention(c) (
+                    AnyObject,
+                    Selector,
+                    NSRect
+                ) -> Void
+                let objectiveCDraw = unsafeBitCast(
+                    view.method(for: selector),
+                    to: ObjectiveCDraw.self
+                )
+                objectiveCDraw(view, selector, view.bounds)
+                NSGraphicsContext.restoreGraphicsState()
+            }
         }
     }
 }

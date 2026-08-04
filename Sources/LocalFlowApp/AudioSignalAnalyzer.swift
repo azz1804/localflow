@@ -1,5 +1,7 @@
 import Accelerate
+import AudioToolbox
 import AVFoundation
+import Darwin
 import Foundation
 
 struct AudioWaveformSample: Equatable, Sendable {
@@ -247,13 +249,36 @@ struct VoiceBandFilter {
         lowCutoff: Double = 100,
         highCutoff: Double = 3_800
     ) -> [Float] {
+        var output: [Float] = []
+        process(
+            samples: samples,
+            stride: stride,
+            frameCount: frameCount,
+            sampleRate: sampleRate,
+            lowCutoff: lowCutoff,
+            highCutoff: highCutoff,
+            output: &output
+        )
+        return output
+    }
+
+    mutating func process(
+        samples: UnsafeBufferPointer<Float>,
+        stride: Int = 1,
+        frameCount: Int? = nil,
+        sampleRate: Double,
+        lowCutoff: Double = 100,
+        highCutoff: Double = 3_800,
+        output: inout [Float]
+    ) {
         let safeStride = max(1, stride)
         let measuredFrameCount = min(
             frameCount ?? samples.count / safeStride,
             samples.count / safeStride
         )
         guard measuredFrameCount > 0, sampleRate > 0 else {
-            return []
+            output.removeAll(keepingCapacity: true)
+            return
         }
 
         let sampleDuration = 1 / sampleRate
@@ -266,7 +291,9 @@ struct VoiceBandFilter {
             sampleDuration / (lowPassRC + sampleDuration)
         )
 
-        var output = Array(repeating: Float(0), count: measuredFrameCount)
+        if output.count != measuredFrameCount {
+            output = Array(repeating: 0, count: measuredFrameCount)
+        }
         for frameIndex in 0..<measuredFrameCount {
             let input = samples[frameIndex * safeStride]
             let highPass1 = highPassAlpha
@@ -285,7 +312,6 @@ struct VoiceBandFilter {
                 * (previousLowPass1 - previousLowPass2)
             output[frameIndex] = previousLowPass2
         }
-        return output
     }
 
     mutating func reset() {
@@ -307,6 +333,8 @@ struct VoiceSpectrumAnalyzer {
     private var windowedSamples: [Float] = []
     private var kernels: [BinKernel] = []
     private var binCounts: [Int] = []
+    private var bandPower: [Float] = []
+    private var amplitudes: [Float] = []
 
     mutating func analyze(
         samples: UnsafeBufferPointer<Float>,
@@ -337,7 +365,9 @@ struct VoiceSpectrumAnalyzer {
             windowedSamples[index] = samples[index] * window[index]
         }
 
-        var bandPower = Array(repeating: Float(0), count: segmentCount)
+        for index in bandPower.indices {
+            bandPower[index] = 0
+        }
         windowedSamples.withUnsafeBufferPointer { sampleBuffer in
             guard let sampleBaseAddress = sampleBuffer.baseAddress else {
                 return
@@ -378,9 +408,9 @@ struct VoiceSpectrumAnalyzer {
             }
         }
 
-        var amplitudes = bandPower.indices.map { index -> Float in
+        for index in bandPower.indices {
             let count = Float(max(1, binCounts[index]))
-            return sqrt(bandPower[index] / count)
+            amplitudes[index] = sqrt(bandPower[index] / count)
         }
         guard let maximum = amplitudes.max(), maximum > 0.000_001 else {
             return Array(repeating: 0, count: segmentCount)
@@ -427,6 +457,8 @@ struct VoiceSpectrumAnalyzer {
         windowedSamples = Array(repeating: 0, count: frameCount)
         kernels = []
         binCounts = Array(repeating: 0, count: segmentCount)
+        bandPower = Array(repeating: 0, count: segmentCount)
+        amplitudes = Array(repeating: 0, count: segmentCount)
 
         let minimumBin = max(
             1,
@@ -545,7 +577,8 @@ struct VoiceVisualizationStabilizer {
 }
 
 final class SignalAccumulator: @unchecked Sendable {
-    private let lock = NSLock()
+    private let processingLock = NSLock()
+    private let outputLock = NSLock()
     private var sequence: UInt64 = 0
     private var pendingSample = AudioWaveformSample.zero
     private var pendingLiveEnvelope = Array(
@@ -557,8 +590,7 @@ final class SignalAccumulator: @unchecked Sendable {
     private var voiceBandFilter = VoiceBandFilter()
     private var voiceSpectrumAnalyzer = VoiceSpectrumAnalyzer()
     private var visualizationStabilizer = VoiceVisualizationStabilizer()
-    private var lastFrameLength: AVAudioFrameCount = 0
-    private var sampleRate: Double = 0
+    private var filteredSamples: [Float] = []
     private var measurementStartedAt: TimeInterval?
     private var measurementStartedSequence: UInt64 = 0
     private var didLogCaptureCadence = false
@@ -573,13 +605,17 @@ final class SignalAccumulator: @unchecked Sendable {
             return
         }
 
-        let voiceBandSamples = voiceBandFilter.process(
+        processingLock.lock()
+        defer { processingLock.unlock() }
+
+        voiceBandFilter.process(
             samples: samples,
             stride: stride,
             frameCount: frameCount,
-            sampleRate: sampleRate
+            sampleRate: sampleRate,
+            output: &filteredSamples
         )
-        let (sample, liveEnvelope) = voiceBandSamples
+        let (sample, liveEnvelope) = filteredSamples
             .withUnsafeBufferPointer { voiceSamples in
                 let sample = AudioSignalMeter.measure(samples: voiceSamples)
                 let liveEnvelope = voiceSpectrumAnalyzer.analyze(
@@ -596,7 +632,7 @@ final class SignalAccumulator: @unchecked Sendable {
             voiceLevel: rawVoiceLevel
         )
 
-        lock.lock()
+        outputLock.lock()
         sequence &+= 1
         pendingSample = AudioWaveformSample(
             rootMeanSquare: max(
@@ -619,57 +655,53 @@ final class SignalAccumulator: @unchecked Sendable {
             pendingLiveEnvelope = stabilized.envelope
             pendingVoiceLevel = stabilized.voiceLevel
         }
-        lastFrameLength = AVAudioFrameCount(frameCount)
-        self.sampleRate = sampleRate
-        lock.unlock()
+        let measuredSequence = sequence
+        outputLock.unlock()
+
+        measureCaptureCadence(
+            sequence: measuredSequence,
+            frameLength: AVAudioFrameCount(frameCount),
+            sampleRate: sampleRate
+        )
     }
 
     func snapshot() -> AudioVisualizationFrame {
-        lock.lock()
+        outputLock.lock()
         let frame = AudioVisualizationFrame(
             sequence: sequence,
             sample: pendingSample,
             liveEnvelope: pendingLiveEnvelope,
             voiceLevel: pendingVoiceLevel
         )
-        let measuredSequence = sequence
-        let measuredFrameLength = lastFrameLength
-        let measuredSampleRate = sampleRate
         pendingSample = .zero
-        pendingLiveEnvelope = Array(
-            repeating: 0,
-            count: AudioVisualizationFrame.envelopeSegmentCount
-        )
+        for index in pendingLiveEnvelope.indices {
+            pendingLiveEnvelope[index] = 0
+        }
         pendingVoiceLevel = 0
-        lock.unlock()
-
-        measureCaptureCadence(
-            sequence: measuredSequence,
-            frameLength: measuredFrameLength,
-            sampleRate: measuredSampleRate
-        )
+        outputLock.unlock()
         return frame
     }
 
     func reset() {
-        lock.lock()
-        sequence = 0
-        pendingSample = .zero
-        pendingLiveEnvelope = Array(
-            repeating: 0,
-            count: AudioVisualizationFrame.envelopeSegmentCount
-        )
-        pendingVoiceLevel = 0
+        processingLock.lock()
         voiceLevelTracker.reset()
         voiceBandFilter.reset()
         voiceSpectrumAnalyzer.reset()
         visualizationStabilizer.reset()
-        lastFrameLength = 0
-        sampleRate = 0
+        filteredSamples.removeAll(keepingCapacity: true)
+
+        outputLock.lock()
+        sequence = 0
+        pendingSample = .zero
+        for index in pendingLiveEnvelope.indices {
+            pendingLiveEnvelope[index] = 0
+        }
+        pendingVoiceLevel = 0
         measurementStartedAt = nil
         measurementStartedSequence = 0
         didLogCaptureCadence = false
-        lock.unlock()
+        outputLock.unlock()
+        processingLock.unlock()
     }
 
     private func measureCaptureCadence(
@@ -706,33 +738,346 @@ final class SignalAccumulator: @unchecked Sendable {
     }
 }
 
-private final class AudioCaptureSink: @unchecked Sendable {
-    private let audioFile: AVAudioFile
-    private let lock = NSLock()
-    private var storedWriteError: Error?
+private final class LockFreeAtomicInt32: @unchecked Sendable {
+    private let storage: UnsafeMutablePointer<Int32>
 
-    init(audioFile: AVAudioFile) {
-        self.audioFile = audioFile
+    init(_ value: Int32) {
+        storage = .allocate(capacity: 1)
+        storage.initialize(to: value)
+    }
+
+    deinit {
+        storage.deinitialize(count: 1)
+        storage.deallocate()
+    }
+
+    func load() -> Int32 {
+        OSAtomicAdd32Barrier(0, storage)
+    }
+
+    func store(_ value: Int32) {
+        _ = exchange(value)
+    }
+
+    func exchange(_ value: Int32) -> Int32 {
+        while true {
+            let oldValue = load()
+            if OSAtomicCompareAndSwap32Barrier(oldValue, value, storage) {
+                return oldValue
+            }
+        }
+    }
+
+    func compareExchange(expected: Int32, desired: Int32) -> Bool {
+        OSAtomicCompareAndSwap32Barrier(expected, desired, storage)
+    }
+}
+
+private enum RealtimeSlotState {
+    static let free: Int32 = 0
+    static let writing: Int32 = 1
+    static let ready: Int32 = 2
+    static let reading: Int32 = 3
+}
+
+private final class AnalysisSampleSlot: @unchecked Sendable {
+    let state = LockFreeAtomicInt32(RealtimeSlotState.free)
+    let samples: UnsafeMutableBufferPointer<Float>
+    var frameCount = 0
+    var sampleRate: Double = 0
+    var sequence: UInt64 = 0
+
+    init(capacity: Int) {
+        samples = .allocate(capacity: capacity)
+        samples.initialize(repeating: 0)
+    }
+
+    deinit {
+        samples.deinitialize()
+        samples.deallocate()
+    }
+}
+
+/// Single-producer/single-consumer storage between CoreAudio and the DSP
+/// queue. The callback only copies into preallocated memory and performs atomic
+/// state transitions: no locks, allocation, DFT, disk I/O, or UI work.
+final class RealtimeAnalysisBuffer: @unchecked Sendable {
+    private let slots: [AnalysisSampleSlot]
+    private var writeCursor = 0
+    private var nextSequence: UInt64 = 0
+
+    init(slotCount: Int = 6, frameCapacity: Int = 4_096) {
+        slots = (0..<slotCount).map { _ in
+            AnalysisSampleSlot(capacity: frameCapacity)
+        }
+    }
+
+    func enqueue(_ buffer: AVAudioPCMBuffer) {
+        guard let source = buffer.floatChannelData?[0] else {
+            return
+        }
+
+        let stride = buffer.format.isInterleaved
+            ? max(1, Int(buffer.format.channelCount))
+            : 1
+        enqueue(
+            samples: source,
+            stride: stride,
+            frameCount: Int(buffer.frameLength),
+            sampleRate: buffer.format.sampleRate
+        )
+    }
+
+    /// Copies a render quantum into preallocated storage. This overload lets
+    /// the AVAudioSinkNode feed the visualizer at the CoreAudio render cadence
+    /// instead of waiting for the much larger input-tap buffers used by the
+    /// recording path.
+    func enqueue(
+        samples source: UnsafePointer<Float>,
+        stride: Int,
+        frameCount requestedFrameCount: Int,
+        sampleRate: Double
+    ) {
+        let safeStride = max(1, stride)
+        let frameCount = min(
+            requestedFrameCount,
+            slots[0].samples.count
+        )
+        guard frameCount > 0, sampleRate > 0 else {
+            return
+        }
+
+        for offset in slots.indices {
+            let index = (writeCursor + offset) % slots.count
+            let slot = slots[index]
+            let claimed = slot.state.compareExchange(
+                expected: RealtimeSlotState.free,
+                desired: RealtimeSlotState.writing
+            )
+            guard claimed else {
+                continue
+            }
+
+            for frame in 0..<frameCount {
+                slot.samples[frame] = source[frame * safeStride]
+            }
+            nextSequence &+= 1
+            slot.frameCount = frameCount
+            slot.sampleRate = sampleRate
+            slot.sequence = nextSequence
+            slot.state.store(RealtimeSlotState.ready)
+            writeCursor = (index + 1) % slots.count
+            return
+        }
+        // Dropping a visualization buffer is preferable to blocking audio.
+    }
+
+    func consumeLatest(
+        _ body: (UnsafeBufferPointer<Float>, Int, Double) -> Void
+    ) {
+        var newestIndex: Int?
+        var newestSequence: UInt64 = 0
+
+        for index in slots.indices {
+            let slot = slots[index]
+            guard slot.state.load()
+                    == RealtimeSlotState.ready else {
+                continue
+            }
+            if newestIndex == nil || slot.sequence > newestSequence {
+                newestIndex = index
+                newestSequence = slot.sequence
+            }
+        }
+
+        for index in slots.indices where index != newestIndex {
+            releaseReadySlot(at: index)
+        }
+
+        guard let newestIndex else {
+            return
+        }
+        let slot = slots[newestIndex]
+        let claimed = slot.state.compareExchange(
+            expected: RealtimeSlotState.ready,
+            desired: RealtimeSlotState.reading
+        )
+        guard claimed else {
+            return
+        }
+
+        body(
+            UnsafeBufferPointer(
+                start: slot.samples.baseAddress,
+                count: slot.frameCount
+            ),
+            slot.frameCount,
+            slot.sampleRate
+        )
+        slot.state.store(RealtimeSlotState.free)
+    }
+
+    func discardPending() {
+        for index in slots.indices {
+            releaseReadySlot(at: index)
+        }
+    }
+
+    private func releaseReadySlot(at index: Int) {
+        let slot = slots[index]
+        let claimed = slot.state.compareExchange(
+            expected: RealtimeSlotState.ready,
+            desired: RealtimeSlotState.reading
+        )
+        if claimed {
+            slot.state.store(RealtimeSlotState.free)
+        }
+    }
+}
+
+private final class AudioAnalysisWorker: @unchecked Sendable {
+    private let accumulator: SignalAccumulator
+    private let realtimeBuffer = RealtimeAnalysisBuffer()
+    private let queue = DispatchQueue(
+        label: "com.localflow.audio-analysis",
+        qos: .userInteractive
+    )
+    private let timer: DispatchSourceTimer
+    private let running = LockFreeAtomicInt32(0)
+
+    init(accumulator: SignalAccumulator) {
+        self.accumulator = accumulator
+        timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now(),
+            repeating: .milliseconds(16),
+            leeway: .milliseconds(2)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.analyzeLatestBuffer()
+        }
+    }
+
+    func start() {
+        guard running.compareExchange(expected: 0, desired: 1) else {
+            return
+        }
+        timer.resume()
+    }
+
+    func enqueue(
+        samples: UnsafePointer<Float>,
+        stride: Int,
+        frameCount: Int,
+        sampleRate: Double
+    ) {
+        guard running.load() == 1 else {
+            return
+        }
+        realtimeBuffer.enqueue(
+            samples: samples,
+            stride: stride,
+            frameCount: frameCount,
+            sampleRate: sampleRate
+        )
+    }
+
+    func stop() {
+        guard running.exchange(0) == 1 else {
+            return
+        }
+        timer.cancel()
+        queue.sync {
+            realtimeBuffer.discardPending()
+            accumulator.reset()
+        }
+    }
+
+    private func analyzeLatestBuffer() {
+        realtimeBuffer.consumeLatest { [accumulator] samples, count, sampleRate in
+            accumulator.consume(
+                samples: samples,
+                stride: 1,
+                frameCount: count,
+                sampleRate: sampleRate
+            )
+        }
+    }
+}
+
+/// The capture file adopts the exact format of the first buffer delivered by
+/// the input tap. The system can change its default input route between the
+/// time an engine is constructed and the time it starts (notably when a
+/// Bluetooth headset switches profile), so pre-creating the file from
+/// `input.outputFormat(forBus:)` can silently pair a 48 kHz tap with a stale
+/// 44.1 kHz file format.
+final class AudioCaptureSink: @unchecked Sendable {
+    private let recordingURL: URL
+    private let lock = NSLock()
+    private var audioFile: AVAudioFile?
+    private var storedWriteError: Error?
+    private var writtenFrameCount: AVAudioFramePosition = 0
+    private var isAcceptingBuffers = true
+
+    init(recordingURL: URL) {
+        self.recordingURL = recordingURL
     }
 
     func consume(_ buffer: AVAudioPCMBuffer) {
-        do {
-            try audioFile.write(from: buffer)
-        } catch {
-            lock.lock()
-            if storedWriteError == nil {
-                storedWriteError = error
-            }
-            lock.unlock()
+        guard buffer.frameLength > 0 else {
+            return
         }
 
+        lock.lock()
+        defer { lock.unlock() }
+        guard isAcceptingBuffers, storedWriteError == nil else {
+            return
+        }
+
+        do {
+            if audioFile == nil {
+                guard buffer.format.commonFormat == .pcmFormatFloat32,
+                      buffer.format.channelCount > 0,
+                      buffer.format.sampleRate > 0 else {
+                    throw AudioRecorderError.couldNotStart
+                }
+                audioFile = try AVAudioFile(
+                    forWriting: recordingURL,
+                    settings: buffer.format.settings,
+                    commonFormat: .pcmFormatFloat32,
+                    interleaved: buffer.format.isInterleaved
+                )
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: recordingURL.path
+                )
+            }
+            guard let audioFile else {
+                throw AudioRecorderError.couldNotStart
+            }
+            try audioFile.write(from: buffer)
+            writtenFrameCount += AVAudioFramePosition(buffer.frameLength)
+        } catch {
+            storedWriteError = error
+        }
     }
 
-    func writeError() -> Error? {
+    func finish() throws {
         lock.lock()
+        isAcceptingBuffers = false
         let error = storedWriteError
+        let frames = writtenFrameCount
+        // Releasing AVAudioFile finalizes its container before the caller
+        // validates or moves the recording.
+        audioFile = nil
         lock.unlock()
-        return error
+
+        if let error {
+            throw error
+        }
+        guard frames > 0 else {
+            throw AudioRecorderError.recordingUnavailable
+        }
     }
 }
 
@@ -740,8 +1085,9 @@ private final class AudioCaptureSink: @unchecked Sendable {
 final class MicrophoneAudioCapture {
     private let engine = AVAudioEngine()
     private let accumulator = SignalAccumulator()
-    private var sink: AudioCaptureSink?
-    private var monitoringSinkNode: AVAudioSinkNode?
+    private var captureSink: AudioCaptureSink?
+    private var analysisWorker: AudioAnalysisWorker?
+    private var drainNode: AVAudioSinkNode?
     private var tapIsInstalled = false
     private var isRunning = false
 
@@ -749,30 +1095,37 @@ final class MicrophoneAudioCapture {
         try? stop()
 
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.channelCount > 0, format.sampleRate > 0 else {
+        let currentFormat = input.outputFormat(forBus: 0)
+        guard currentFormat.channelCount > 0,
+              currentFormat.sampleRate > 0 else {
             throw AudioRecorderError.couldNotStart
         }
-
-        let audioFile = try AVAudioFile(
-            forWriting: recordingURL,
-            settings: format.settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
+        let captureSink = AudioCaptureSink(recordingURL: recordingURL)
+        let analysisWorker = AudioAnalysisWorker(accumulator: accumulator)
+        let drainNode = Self.makeDrainNode(
+            analysisWorker: analysisWorker,
+            sampleRate: currentFormat.sampleRate,
+            isInterleaved: currentFormat.isInterleaved
         )
-        let sink = AudioCaptureSink(audioFile: audioFile)
-        self.sink = sink
 
-        let monitoringSinkNode = makeMonitoringSinkNode(format: format)
-        engine.attach(monitoringSinkNode)
-        engine.connect(input, to: monitoringSinkNode, format: format)
-        self.monitoringSinkNode = monitoringSinkNode
+        // A tap alone is not sufficient to pull live microphone samples on
+        // every macOS/device combination. Keep an explicit sink in the graph,
+        // while asking AVAudioEngine to negotiate both formats from the active
+        // route at start time.
+        engine.attach(drainNode)
+        engine.connect(input, to: drainNode, format: nil)
+        analysisWorker.start()
+        self.captureSink = captureSink
+        self.analysisWorker = analysisWorker
+        self.drainNode = drainNode
 
         input.installTap(
             onBus: 0,
             bufferSize: 512,
-            format: format,
-            block: Self.makeTapBlock(for: sink)
+            format: nil,
+            block: Self.makeTapBlock(
+                captureSink: captureSink
+            )
         )
         tapIsInstalled = true
 
@@ -783,9 +1136,14 @@ final class MicrophoneAudioCapture {
         } catch {
             input.removeTap(onBus: 0)
             tapIsInstalled = false
-            engine.detach(monitoringSinkNode)
-            self.monitoringSinkNode = nil
-            self.sink = nil
+            engine.disconnectNodeInput(drainNode)
+            engine.detach(drainNode)
+            analysisWorker.stop()
+            try? captureSink.finish()
+            self.analysisWorker = nil
+            self.captureSink = nil
+            self.drainNode = nil
+            engine.reset()
             throw error
         }
     }
@@ -799,17 +1157,18 @@ final class MicrophoneAudioCapture {
             engine.inputNode.removeTap(onBus: 0)
             tapIsInstalled = false
         }
-        if let monitoringSinkNode {
-            engine.detach(monitoringSinkNode)
-            self.monitoringSinkNode = nil
+        if let drainNode {
+            engine.disconnectNodeInput(drainNode)
+            engine.detach(drainNode)
+            self.drainNode = nil
         }
+        analysisWorker?.stop()
+        analysisWorker = nil
 
-        let writeError = sink?.writeError()
-        sink = nil
-        accumulator.reset()
-        if let writeError {
-            throw writeError
-        }
+        let captureSink = captureSink
+        self.captureSink = nil
+        defer { engine.reset() }
+        try captureSink?.finish()
     }
 
     func currentFrame() -> AudioVisualizationFrame {
@@ -817,50 +1176,42 @@ final class MicrophoneAudioCapture {
     }
 
     private nonisolated static func makeTapBlock(
-        for sink: AudioCaptureSink
+        captureSink: AudioCaptureSink
     ) -> AVAudioNodeTapBlock {
         { buffer, _ in
-            sink.consume(buffer)
+            captureSink.consume(buffer)
         }
     }
 
-    private nonisolated func makeMonitoringSinkNode(
-        format: AVAudioFormat
+    private nonisolated static func makeDrainNode(
+        analysisWorker: AudioAnalysisWorker,
+        sampleRate: Double,
+        isInterleaved: Bool
     ) -> AVAudioSinkNode {
-        let accumulator = accumulator
-        let sampleRate = format.sampleRate
-        let isInterleaved = format.isInterleaved
-
-        return AVAudioSinkNode {
-            _, frameCount, inputData -> OSStatus in
+        AVAudioSinkNode { _, frameCount, inputData in
             let audioBuffer = inputData.pointee.mBuffers
             guard let rawData = audioBuffer.mData else {
                 return noErr
             }
 
-            let channelStride = isInterleaved
+            let stride = isInterleaved
                 ? max(1, Int(audioBuffer.mNumberChannels))
                 : 1
             let availableSampleCount = Int(audioBuffer.mDataByteSize)
                 / MemoryLayout<Float>.size
-            let requestedSampleCount = Int(frameCount) * channelStride
-            let sampleCount = min(
-                availableSampleCount,
-                requestedSampleCount
+            let availableFrameCount = availableSampleCount / stride
+            let safeFrameCount = min(
+                Int(frameCount),
+                availableFrameCount
             )
-            let availableFrameCount = sampleCount / channelStride
-            guard availableFrameCount > 0 else {
+            guard safeFrameCount > 0 else {
                 return noErr
             }
 
-            let samples = UnsafeBufferPointer(
-                start: rawData.assumingMemoryBound(to: Float.self),
-                count: sampleCount
-            )
-            accumulator.consume(
-                samples: samples,
-                stride: channelStride,
-                frameCount: availableFrameCount,
+            analysisWorker.enqueue(
+                samples: rawData.assumingMemoryBound(to: Float.self),
+                stride: stride,
+                frameCount: safeFrameCount,
                 sampleRate: sampleRate
             )
             return noErr

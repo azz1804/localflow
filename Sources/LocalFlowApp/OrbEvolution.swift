@@ -107,23 +107,25 @@ struct OrbProgression: Equatable, Sendable {
 }
 
 enum OrbEvolution {
+    static let brandTheme = OrbTheme(
+        id: "violet-tide",
+        name: "Violet Tide",
+        unlockWords: 0,
+        material: .water,
+        baseDark: OrbRGBA(red: 0.025, green: 0.008, blue: 0.13),
+        primary: OrbRGBA(red: 0.34, green: 0.1, blue: 0.9),
+        secondary: OrbRGBA(red: 0.66, green: 0.24, blue: 1),
+        accent: OrbRGBA(red: 0.96, green: 0.22, blue: 0.74),
+        highlight: OrbRGBA(red: 0.78, green: 0.68, blue: 1),
+        rim: OrbRGBA(red: 0.5, green: 0.28, blue: 0.96),
+        motionSpeed: 1,
+        breathingAmplitude: 0.013,
+        fieldScale: 1,
+        sparkleCount: 4
+    )
+
     static let themes: [OrbTheme] = [
-        OrbTheme(
-            id: "violet-tide",
-            name: "Violet Tide",
-            unlockWords: 0,
-            material: .water,
-            baseDark: OrbRGBA(red: 0.025, green: 0.008, blue: 0.13),
-            primary: OrbRGBA(red: 0.34, green: 0.1, blue: 0.9),
-            secondary: OrbRGBA(red: 0.66, green: 0.24, blue: 1),
-            accent: OrbRGBA(red: 0.96, green: 0.22, blue: 0.74),
-            highlight: OrbRGBA(red: 0.78, green: 0.68, blue: 1),
-            rim: OrbRGBA(red: 0.5, green: 0.28, blue: 0.96),
-            motionSpeed: 1,
-            breathingAmplitude: 0.013,
-            fieldScale: 1,
-            sparkleCount: 4
-        ),
+        brandTheme,
         OrbTheme(
             id: "cobalt-current",
             name: "Cobalt Current",

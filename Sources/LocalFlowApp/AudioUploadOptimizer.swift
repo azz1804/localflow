@@ -16,6 +16,40 @@ private final class ExportSessionBox: @unchecked Sendable {
     }
 }
 
+private final class ExportContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<AVAssetExportSession.Status, Never>?
+    private var timeoutWorkItem: DispatchWorkItem?
+
+    init(
+        continuation: CheckedContinuation<AVAssetExportSession.Status, Never>
+    ) {
+        self.continuation = continuation
+    }
+
+    func finish(with status: AVAssetExportSession.Status) {
+        lock.lock()
+        let continuation = continuation
+        self.continuation = nil
+        let timeoutWorkItem = timeoutWorkItem
+        self.timeoutWorkItem = nil
+        lock.unlock()
+        timeoutWorkItem?.cancel()
+        continuation?.resume(returning: status)
+    }
+
+    func installTimeout(_ workItem: DispatchWorkItem) {
+        lock.lock()
+        if continuation == nil {
+            lock.unlock()
+            workItem.cancel()
+            return
+        }
+        timeoutWorkItem = workItem
+        lock.unlock()
+    }
+}
+
 @MainActor
 enum AudioUploadOptimizer {
     static func prepare(_ sourceURL: URL) async -> OptimizedAudioUpload {
@@ -49,13 +83,10 @@ enum AudioUploadOptimizer {
         exportSession.shouldOptimizeForNetworkUse = true
 
         let exportSessionBox = ExportSessionBox(exportSession)
-        let status = await withCheckedContinuation { continuation in
-            exportSession.exportAsynchronously {
-                continuation.resume(
-                    returning: exportSessionBox.session.status
-                )
-            }
-        }
+        let status = await export(
+            exportSessionBox,
+            timeout: exportTimeout
+        )
 
         let uploadByteCount = byteCount(of: destinationURL)
         guard status == .completed,
@@ -68,6 +99,10 @@ enum AudioUploadOptimizer {
                 startedAt: startedAt
             )
         }
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: destinationURL.path
+        )
 
         return OptimizedAudioUpload(
             fileURL: destinationURL,
@@ -99,5 +134,31 @@ enum AudioUploadOptimizer {
         return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
     }
 
+    private static func export(
+        _ box: ExportSessionBox,
+        timeout: TimeInterval
+    ) async -> AVAssetExportSession.Status {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let gate = ExportContinuationGate(continuation: continuation)
+                box.session.exportAsynchronously {
+                    gate.finish(with: box.session.status)
+                }
+                let timeoutWorkItem = DispatchWorkItem {
+                    box.session.cancelExport()
+                    gate.finish(with: .cancelled)
+                }
+                gate.installTimeout(timeoutWorkItem)
+                DispatchQueue.global(qos: .utility).asyncAfter(
+                    deadline: .now() + timeout,
+                    execute: timeoutWorkItem
+                )
+            }
+        } onCancel: {
+            box.session.cancelExport()
+        }
+    }
+
     private static let minimumCompressionByteCount: Int64 = 750_000
+    private static let exportTimeout: TimeInterval = 30
 }
