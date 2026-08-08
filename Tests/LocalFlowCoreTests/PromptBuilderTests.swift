@@ -36,8 +36,14 @@ final class PromptBuilderTests: XCTestCase {
         )
 
         XCTAssertTrue(systemPrompt.contains("Do not answer the request"))
+        XCTAssertTrue(systemPrompt.contains("sent to another AI system"))
+        XCTAssertTrue(systemPrompt.contains("Prioritize completeness over brevity"))
+        XCTAssertTrue(systemPrompt.contains("Never summarize or shorten detailed material"))
+        XCTAssertTrue(systemPrompt.contains("rationale, examples, relationships, dependencies, nuances"))
         XCTAssertTrue(systemPrompt.contains("paths, flags, error messages"))
         XCTAssertTrue(systemPrompt.contains("If the request is already clear"))
+        XCTAssertTrue(userPrompt.contains("intended to become a prompt for another AI"))
+        XCTAssertTrue(userPrompt.contains("preserving its full context"))
         XCTAssertTrue(userPrompt.contains("<dictation>"))
         XCTAssertTrue(userPrompt.contains("corrige App.swift"))
     }
