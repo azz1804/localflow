@@ -42,8 +42,10 @@ final class PromptBuilderTests: XCTestCase {
         XCTAssertTrue(systemPrompt.contains("rationale, examples, relationships, dependencies, nuances"))
         XCTAssertTrue(systemPrompt.contains("paths, flags, error messages"))
         XCTAssertTrue(systemPrompt.contains("If the request is already clear"))
-        XCTAssertTrue(userPrompt.contains("intended to become a prompt for another AI"))
-        XCTAssertTrue(userPrompt.contains("preserving its full context"))
+        XCTAssertTrue(systemPrompt.contains("human voice, directness, emotional tone, and intensity"))
+        XCTAssertTrue(systemPrompt.contains("every stated reason"))
+        XCTAssertTrue(systemPrompt.contains("Correct obvious transcription, spelling, grammar"))
+        XCTAssertTrue(systemPrompt.contains("when meaning is ambiguous, preserve it rather than guessing"))
         XCTAssertTrue(userPrompt.contains("<dictation>"))
         XCTAssertTrue(userPrompt.contains("corrige App.swift"))
     }

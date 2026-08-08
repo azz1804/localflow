@@ -856,30 +856,37 @@ final class DictationController {
 
         switch parameters.resolvedOutputMode {
         case .prompt:
-            do {
-                let promptStartedAt = ProcessInfo.processInfo.systemUptime
-                finalText = try await client.rewriteAsPrompt(
-                    text: finalText,
-                    model: parameters.promptModel ?? "gpt-5.6-luna",
-                    systemPrompt: PromptBuilder.promptModeSystemPrompt(
-                        targetApplication: job.targetApplication
-                    ),
-                    userPrompt: PromptBuilder.promptModeUserPrompt(
-                        text: finalText
+            outputMode = .prompt
+            let decision = PromptModeRouter.decide(for: finalText)
+            LocalFlowLogger.log(
+                "Prompt Mode route=\(decision.route.rawValue) reason=\(decision.reason.rawValue) words=\(decision.wordCount)"
+            )
+
+            if decision.shouldUseAI {
+                do {
+                    let promptStartedAt = ProcessInfo.processInfo.systemUptime
+                    finalText = try await client.rewriteAsPrompt(
+                        text: finalText,
+                        model: parameters.promptModel ?? "gpt-5.6-luna",
+                        systemPrompt: PromptBuilder.promptModeSystemPrompt(
+                            targetApplication: job.targetApplication
+                        ),
+                        userPrompt: PromptBuilder.promptModeUserPrompt(
+                            text: finalText
+                        )
                     )
-                )
-                try Task.checkCancellation()
-                polished = true
-                outputMode = .prompt
-                LocalFlowLogger.log(
-                    "Prompt Mode finished chars=\(finalText.count) durationMs=\(Int(((ProcessInfo.processInfo.systemUptime - promptStartedAt) * 1_000).rounded())) model=\(parameters.promptModel ?? "gpt-5.6-luna")"
-                )
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                LocalFlowLogger.log(
-                    "Prompt Mode failed; using raw transcript error=\(error.localizedDescription)"
-                )
+                    try Task.checkCancellation()
+                    polished = true
+                    LocalFlowLogger.log(
+                        "Prompt Mode finished chars=\(finalText.count) durationMs=\(Int(((ProcessInfo.processInfo.systemUptime - promptStartedAt) * 1_000).rounded())) model=\(parameters.promptModel ?? "gpt-5.6-luna")"
+                    )
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    LocalFlowLogger.log(
+                        "Prompt Mode failed; using raw transcript error=\(error.localizedDescription)"
+                    )
+                }
             }
         case .polish:
             do {
