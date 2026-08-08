@@ -52,7 +52,7 @@ public struct AppConfiguration: Equatable, Sendable {
         enablePolish: Bool = false,
         polishModel: String = "gpt-4o-mini",
         enablePromptMode: Bool = false,
-        promptModel: String = "gpt-5.4-nano",
+        promptModel: String = "gpt-5.6-luna",
         holdHotkey: String = "fn",
         fallbackHoldHotkey: String = "option+space",
         toggleHotkey: String = "fn+space",
@@ -90,7 +90,7 @@ public struct AppConfiguration: Equatable, Sendable {
                 env["ENABLE_PROMPT_MODE"],
                 default: false
             ),
-            promptModel: env["PROMPT_MODEL"]?.nonEmpty ?? "gpt-5.4-nano",
+            promptModel: env["PROMPT_MODEL"]?.nonEmpty ?? "gpt-5.6-luna",
             holdHotkey: env["HOLD_HOTKEY"]?.nonEmpty ?? "fn",
             fallbackHoldHotkey: env["FALLBACK_HOLD_HOTKEY"]?.nonEmpty ?? "option+space",
             toggleHotkey: env["TOGGLE_HOTKEY"]?.nonEmpty ?? "fn+space",

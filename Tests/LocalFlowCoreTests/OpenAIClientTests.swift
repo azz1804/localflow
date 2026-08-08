@@ -21,7 +21,7 @@ final class OpenAIClientTests: XCTestCase {
 
         let result = try await client.rewriteAsPrompt(
             text: "corrige le bug et garde les tests",
-            model: "gpt-5.4-nano",
+            model: "gpt-5.6-luna",
             systemPrompt: "Réécris en prompt.",
             userPrompt: "<dictation>corrige le bug</dictation>"
         )
@@ -37,7 +37,7 @@ final class OpenAIClientTests: XCTestCase {
         let payload = try XCTUnwrap(
             JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
-        XCTAssertEqual(payload["model"] as? String, "gpt-5.4-nano")
+        XCTAssertEqual(payload["model"] as? String, "gpt-5.6-luna")
         XCTAssertEqual(payload["store"] as? Bool, false)
         XCTAssertEqual(payload["max_output_tokens"] as? Int, 4_096)
         XCTAssertEqual(
@@ -66,7 +66,7 @@ final class OpenAIClientTests: XCTestCase {
         do {
             _ = try await client.rewriteAsPrompt(
                 text: "une demande",
-                model: "gpt-5.4-nano",
+                model: "gpt-5.6-luna",
                 systemPrompt: "Réécris.",
                 userPrompt: "une demande"
             )

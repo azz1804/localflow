@@ -860,7 +860,7 @@ final class DictationController {
                 let promptStartedAt = ProcessInfo.processInfo.systemUptime
                 finalText = try await client.rewriteAsPrompt(
                     text: finalText,
-                    model: parameters.promptModel ?? "gpt-5.4-nano",
+                    model: parameters.promptModel ?? "gpt-5.6-luna",
                     systemPrompt: PromptBuilder.promptModeSystemPrompt(
                         targetApplication: job.targetApplication
                     ),
@@ -872,7 +872,7 @@ final class DictationController {
                 polished = true
                 outputMode = .prompt
                 LocalFlowLogger.log(
-                    "Prompt Mode finished chars=\(finalText.count) durationMs=\(Int(((ProcessInfo.processInfo.systemUptime - promptStartedAt) * 1_000).rounded())) model=\(parameters.promptModel ?? "gpt-5.4-nano")"
+                    "Prompt Mode finished chars=\(finalText.count) durationMs=\(Int(((ProcessInfo.processInfo.systemUptime - promptStartedAt) * 1_000).rounded())) model=\(parameters.promptModel ?? "gpt-5.6-luna")"
                 )
             } catch is CancellationError {
                 throw CancellationError()

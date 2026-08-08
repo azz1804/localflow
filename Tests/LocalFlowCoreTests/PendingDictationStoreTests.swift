@@ -13,7 +13,7 @@ final class PendingDictationStoreTests: XCTestCase {
                 enablePolish: false,
                 polishModel: "polish",
                 outputMode: .prompt,
-                promptModel: "gpt-5.4-nano",
+                promptModel: "gpt-5.6-luna",
                 dictionary: .empty
             ),
             stage: .ready,
@@ -30,7 +30,7 @@ final class PendingDictationStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(restored.parameters.resolvedOutputMode, .prompt)
-        XCTAssertEqual(restored.parameters.promptModel, "gpt-5.4-nano")
+        XCTAssertEqual(restored.parameters.promptModel, "gpt-5.6-luna")
         XCTAssertEqual(restored.makeHistoryRecord()?.resolvedOutputMode, .prompt)
     }
 

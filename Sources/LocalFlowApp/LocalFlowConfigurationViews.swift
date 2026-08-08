@@ -238,10 +238,10 @@ struct LocalFlowSettingsView: View {
                     if model.configuration.outputMode == .prompt {
                         HubSettingRow(
                             label: "Prompt model",
-                            help: "Fast text model used to clarify the transcript. GPT-5.4 Nano runs with reasoning disabled for minimum latency."
+                            help: "Fast text model used to clarify the transcript. GPT-5.6 Luna runs with reasoning disabled for low latency and stronger prompt quality."
                         ) {
                             TextField(
-                                "gpt-5.4-nano",
+                                "gpt-5.6-luna",
                                 text: $model.configuration.promptModel
                             )
                             .textFieldStyle(.roundedBorder)

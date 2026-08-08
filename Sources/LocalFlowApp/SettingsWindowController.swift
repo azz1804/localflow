@@ -174,7 +174,7 @@ final class LocalFlowHubModel: ObservableObject {
             in: .whitespacesAndNewlines
         )
         if updated.promptModel.isEmpty {
-            updated.promptModel = "gpt-5.4-nano"
+            updated.promptModel = "gpt-5.6-luna"
         }
         updated.historyRetentionDays = max(0, updated.historyRetentionDays)
         updated.pasteRestoreDelayMilliseconds = max(0, updated.pasteRestoreDelayMilliseconds)

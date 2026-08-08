@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             try loadRuntimeConfiguration()
             recoverOrphanedTemporaryAudio()
-            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") commit=\(Bundle.main.object(forInfoDictionaryKey: "LocalFlowGitCommit") as? String ?? "unknown") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey)")
+            LocalFlowLogger.log("Launch appPath=\(Bundle.main.bundlePath) bundleID=\(Bundle.main.bundleIdentifier ?? "-") commit=\(Bundle.main.object(forInfoDictionaryKey: "LocalFlowGitCommit") as? String ?? "unknown") hold=\(configuration.holdHotkey) fallback=\(configuration.fallbackHoldHotkey) toggle=\(configuration.toggleHotkey) outputMode=\(configuration.outputMode.rawValue) promptModel=\(configuration.promptModel)")
             setupMenuBar()
             configureLaunchAtLogin()
             setupControllers()
@@ -571,15 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func togglePolishOnMainActor() {
-        guard let dictationController else {
-            return
-        }
-
-        dictationController.isPolishEnabled.toggle()
-        configuration.outputMode = dictationController.isPolishEnabled
-            ? .polish
-            : .transcript
-        updateOutputModeMenuItems()
+        toggleOutputMode(.polish)
     }
 
     @objc nonisolated private func togglePromptMode() {
@@ -589,15 +581,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func togglePromptModeOnMainActor() {
+        toggleOutputMode(.prompt)
+    }
+
+    private func toggleOutputMode(_ requestedMode: DictationOutputMode) {
         guard let dictationController else {
             return
         }
 
-        dictationController.isPromptModeEnabled.toggle()
-        configuration.outputMode = dictationController.isPromptModeEnabled
-            ? .prompt
-            : .transcript
+        configuration.outputMode = configuration.outputMode == requestedMode
+            ? .transcript
+            : requestedMode
+        dictationController.updateConfiguration(
+            configuration,
+            dictionary: dictionary
+        )
         updateOutputModeMenuItems()
+
+        do {
+            let url = appSupportURL.appendingPathComponent(".env")
+            try ConfigurationStore.save(configuration, to: url)
+            envSourceURL = url
+            LocalFlowLogger.log(
+                "Output mode changed mode=\(configuration.outputMode.rawValue) promptModel=\(configuration.promptModel)"
+            )
+        } catch {
+            LocalFlowLogger.log(
+                "Output mode persistence failed error=\(error.localizedDescription)"
+            )
+            floatingBarController?.update(
+                status: .error("Could not save the writing mode.")
+            )
+        }
     }
 
     private func updateOutputModeMenuItems() {

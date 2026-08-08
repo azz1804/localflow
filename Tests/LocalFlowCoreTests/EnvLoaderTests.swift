@@ -66,7 +66,7 @@ final class EnvLoaderTests: XCTestCase {
             enablePolish: true,
             polishModel: "gpt-4o-mini",
             enablePromptMode: false,
-            promptModel: "gpt-5.4-nano",
+            promptModel: "gpt-5.6-luna",
             holdHotkey: "fn",
             fallbackHoldHotkey: "option+space",
             toggleHotkey: "fn+space",
@@ -95,7 +95,7 @@ final class EnvLoaderTests: XCTestCase {
 
     func testPromptModeDefaultsToOffAndIsExclusiveWithPolish() {
         XCTAssertFalse(AppConfiguration().enablePromptMode)
-        XCTAssertEqual(AppConfiguration().promptModel, "gpt-5.4-nano")
+        XCTAssertEqual(AppConfiguration().promptModel, "gpt-5.6-luna")
 
         var configuration = AppConfiguration(enablePolish: true)
         XCTAssertEqual(configuration.outputMode, .polish)
