@@ -1,8 +1,71 @@
 import AppKit
+import LocalFlowCore
 import XCTest
 @testable import LocalFlowApp
 
 final class FloatingBarPresentationTests: XCTestCase {
+    func testWritingModesCycleWithoutDeadEnd() {
+        XCTAssertEqual(DictationOutputMode.transcript.next, .polish)
+        XCTAssertEqual(DictationOutputMode.polish.next, .prompt)
+        XCTAssertEqual(DictationOutputMode.prompt.next, .transcript)
+    }
+
+    func testModeControlStaysBetweenSpectrumAndTimer() {
+        let cardRect = NSRect(x: 6, y: 5, width: 292, height: 54)
+        let modeRect = FloatingBarModeControlLayout.modeRect(in: cardRect)
+        let timerRect = FloatingBarModeControlLayout.timerRect(in: cardRect)
+
+        XCTAssertGreaterThanOrEqual(modeRect.minX, cardRect.minX)
+        XCTAssertLessThan(modeRect.maxX, timerRect.minX)
+        XCTAssertLessThanOrEqual(timerRect.maxX, cardRect.maxX)
+        XCTAssertEqual(modeRect.height, timerRect.height)
+    }
+
+    func testModeControlClickChangesTheActiveMode() {
+        XCTAssertTrue(Thread.isMainThread)
+        AppKitMainThreadBridge.run {
+            let view = FloatingBarView(
+                frame: NSRect(
+                    origin: .zero,
+                    size: FloatingBarController.panelSize
+                )
+            )
+            view.update(
+                status: .recording(2, .toggle),
+                visualization: .silent,
+                reduceMotion: true
+            )
+            var selectedMode: DictationOutputMode?
+            view.onOutputModeChange = { selectedMode = $0 }
+
+            let cardRect = view.bounds.insetBy(dx: 6, dy: 5)
+            let modeRect = FloatingBarModeControlLayout.modeRect(
+                in: cardRect
+            )
+            let clickPoint = NSPoint(
+                x: modeRect.midX,
+                y: modeRect.midY
+            )
+            let event = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: clickPoint,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: 1
+            )
+
+            if let event {
+                view.mouseDown(with: event)
+            }
+
+            XCTAssertEqual(selectedMode, .polish)
+        }
+    }
+
     func testEveryOrbProducesADistinctBarAtmosphere() {
         let palettes = OrbEvolution.themes.map(FloatingBarPalette.init)
         let signatures = Set(

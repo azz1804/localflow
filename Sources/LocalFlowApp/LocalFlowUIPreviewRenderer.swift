@@ -98,6 +98,14 @@ enum LocalFlowUIPreviewRenderer {
             )
         )
         try renderFloatingBar(
+            hovered: false,
+            outputMode: .polish,
+            orbThemeOverride: "automatic",
+            to: outputDirectory.appendingPathComponent(
+                "localflow-flowbar-polish-mode.png"
+            )
+        )
+        try renderFloatingBar(
             hovered: true,
             orbThemeOverride: "automatic",
             to: outputDirectory.appendingPathComponent("localflow-flowbar-hover.png")
@@ -197,13 +205,13 @@ enum LocalFlowUIPreviewRenderer {
                     liveEnvelope: liveEnvelope,
                     voiceLevel: 0.88
                 ),
-                reduceMotion: false
+                reduceMotion: true
             )
         }
         if hovered {
             view.setHoveredForPreview(
                 true,
-                location: NSPoint(x: 210, y: 36)
+                location: NSPoint(x: 224, y: 32)
             )
         }
         if processing {

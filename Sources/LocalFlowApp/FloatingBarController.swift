@@ -164,9 +164,32 @@ enum FloatingBarEnvelopeMotion {
     }
 }
 
+enum FloatingBarModeControlLayout {
+    static func timerRect(in cardRect: NSRect) -> NSRect {
+        NSRect(
+            x: cardRect.maxX - 49 - 9,
+            y: cardRect.midY - 10.5,
+            width: 49,
+            height: 21
+        )
+    }
+
+    static func modeRect(in cardRect: NSRect) -> NSRect {
+        let timerRect = timerRect(in: cardRect)
+        return NSRect(
+            x: timerRect.minX - 27,
+            y: timerRect.minY,
+            width: 22,
+            height: timerRect.height
+        )
+    }
+}
+
 @MainActor
 final class FloatingBarController {
-    static let panelSize = NSSize(width: 284, height: 64)
+    static let panelSize = NSSize(width: 304, height: 64)
+
+    var onOutputModeChange: ((DictationOutputMode) -> Void)?
 
     private let panel: NSPanel
     private let contentView: FloatingBarView
@@ -192,6 +215,9 @@ final class FloatingBarController {
         panel.isMovableByWindowBackground = true
         panel.acceptsMouseMovedEvents = true
         panel.animationBehavior = .utilityWindow
+        contentView.onOutputModeChange = { [weak self] mode in
+            self?.onOutputModeChange?(mode)
+        }
     }
 
     func update(
@@ -306,6 +332,7 @@ final class FloatingBarView: NSView {
 
     private var status: AppStatus = .idle
     private var outputMode = DictationOutputMode.transcript
+    var onOutputModeChange: ((DictationOutputMode) -> Void)?
     private var displayedEnvelope = Array(
         repeating: Float(0),
         count: envelopeSegmentCount
@@ -368,6 +395,17 @@ final class FloatingBarView: NSView {
         bounds.insetBy(dx: 6, dy: 5)
     }
 
+    private var modeControlRect: NSRect {
+        FloatingBarModeControlLayout.modeRect(in: cardRect)
+    }
+
+    private var isModeControlHovered: Bool {
+        guard case .recording = status else {
+            return false
+        }
+        return modeControlRect.contains(hoverLocation)
+    }
+
     private func configureLayer() {
         wantsLayer = true
         layer?.masksToBounds = true
@@ -376,6 +414,10 @@ final class FloatingBarView: NSView {
         configureOrbLayers()
         configureProcessingLayers()
         updateAudioLayerGeometry()
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("LocalFlow voice bar")
+        updateOutputModeAccessibility()
     }
 
     private func configureSpectrumLayers() {
@@ -845,12 +887,37 @@ final class FloatingBarView: NSView {
 
     nonisolated override func mouseExited(with event: NSEvent) {
         AppKitMainThreadBridge.run {
+            toolTip = nil
             setHovered(false)
+        }
+    }
+
+    nonisolated override func acceptsFirstMouse(
+        for event: NSEvent?
+    ) -> Bool {
+        true
+    }
+
+    nonisolated override func mouseDown(with event: NSEvent) {
+        let locationInWindow = event.locationInWindow
+        AppKitMainThreadBridge.run {
+            let location = convert(locationInWindow, from: nil)
+            guard case .recording = status,
+                  modeControlRect.contains(location) else {
+                return
+            }
+
+            let nextMode = outputMode.next
+            updateOutputMode(nextMode)
+            onOutputModeChange?(nextMode)
         }
     }
 
     private func updateHoverLocation(locationInWindow: NSPoint) {
         hoverLocation = convert(locationInWindow, from: nil)
+        toolTip = isModeControlHovered
+            ? "\(outputMode.displayName) mode — click to switch"
+            : nil
         needsDisplay = true
     }
 
@@ -947,7 +1014,17 @@ final class FloatingBarView: NSView {
             return
         }
         outputMode = mode
+        updateOutputModeAccessibility()
+        if isModeControlHovered {
+            toolTip = "\(mode.displayName) mode — click to switch"
+        }
         needsDisplay = true
+    }
+
+    private func updateOutputModeAccessibility() {
+        setAccessibilityHelp(
+            "Writing mode: \(outputMode.displayName). Click the mode button to switch."
+        )
     }
 
     func setHoveredForPreview(_ hovered: Bool, location: NSPoint) {
@@ -1276,7 +1353,58 @@ final class FloatingBarView: NSView {
     }
 
     private func drawRecordingState() {
+        drawOutputModeControl()
         drawTimer()
+    }
+
+    private func drawOutputModeControl() {
+        let rect = modeControlRect
+        let path = NSBezierPath(
+            roundedRect: rect,
+            xRadius: rect.height / 2,
+            yRadius: rect.height / 2
+        )
+        let hovered = isModeControlHovered
+
+        NSGradient(
+            colors: [
+                barPalette.spectrumCenter.nsColor(
+                    alpha: hovered ? 0.32 : 0.16
+                ),
+                barPalette.backgroundBottom.nsColor(alpha: 0.96)
+            ]
+        )?.draw(in: path, angle: -70)
+
+        let borderColor = hovered
+            ? barPalette.spectrumCenter.nsColor(alpha: 0.66)
+            : NSColor.white.withAlphaComponent(0.12)
+        borderColor.setStroke()
+        path.lineWidth = hovered ? 0.9 : 0.7
+        path.stroke()
+
+        let color = barPalette.spectrumCenter.nsColor(
+            alpha: hovered ? 1 : 0.76
+        )
+        let configuration = NSImage.SymbolConfiguration(
+            pointSize: 8.5,
+            weight: .semibold
+        ).applying(
+            NSImage.SymbolConfiguration(paletteColors: [color])
+        )
+        guard let image = NSImage(
+            systemSymbolName: outputMode.systemSymbolName,
+            accessibilityDescription: "\(outputMode.displayName) mode"
+        )?.withSymbolConfiguration(configuration) else {
+            return
+        }
+        image.draw(
+            in: NSRect(
+                x: rect.midX - image.size.width / 2,
+                y: rect.midY - image.size.height / 2,
+                width: image.size.width,
+                height: image.size.height
+            )
+        )
     }
 
     private func drawTimer() {
@@ -1290,14 +1418,7 @@ final class FloatingBarView: NSView {
             totalSeconds / 60,
             totalSeconds % 60
         )
-        let showsPromptMode = outputMode == .prompt
-        let capsuleWidth: CGFloat = showsPromptMode ? 65 : 49
-        let capsuleRect = NSRect(
-            x: cardRect.maxX - capsuleWidth - 9,
-            y: cardRect.midY - 10.5,
-            width: capsuleWidth,
-            height: 21
-        )
+        let capsuleRect = FloatingBarModeControlLayout.timerRect(in: cardRect)
         drawTimerCapsule(in: capsuleRect, mode: mode)
 
         let timerAttributes: [NSAttributedString.Key: Any] = [
@@ -1310,10 +1431,9 @@ final class FloatingBarView: NSView {
             )
         ]
         let timerSize = value.size(withAttributes: timerAttributes)
-        let timerCenterX = capsuleRect.midX + (showsPromptMode ? 7 : 0)
         value.draw(
             in: NSRect(
-                x: timerCenterX - timerSize.width / 2,
+                x: capsuleRect.midX - timerSize.width / 2,
                 y: capsuleRect.midY - timerSize.height / 2,
                 width: ceil(timerSize.width),
                 height: ceil(timerSize.height)
@@ -1321,25 +1441,6 @@ final class FloatingBarView: NSView {
             withAttributes: timerAttributes
         )
 
-        if showsPromptMode {
-            let promptMark = "✦" as NSString
-            let promptMarkAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
-                .foregroundColor: barPalette.spectrumCenter.nsColor(
-                    alpha: isHovered ? 0.95 : 0.78
-                )
-            ]
-            let promptMarkSize = promptMark.size(
-                withAttributes: promptMarkAttributes
-            )
-            promptMark.draw(
-                at: NSPoint(
-                    x: capsuleRect.minX + 8,
-                    y: capsuleRect.midY - promptMarkSize.height / 2
-                ),
-                withAttributes: promptMarkAttributes
-            )
-        }
     }
 
     private func drawTimerCapsule(

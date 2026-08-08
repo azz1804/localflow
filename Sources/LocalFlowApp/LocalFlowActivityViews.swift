@@ -33,7 +33,9 @@ struct LocalFlowHomeView: View {
                 HubRecordingHero(
                     totalWords: model.insights.totalWords,
                     orbThemeOverride: model.configuration.orbThemeOverride,
-                    isAnimationActive: model.isHubAnimationActive
+                    isAnimationActive: model.isHubAnimationActive,
+                    outputMode: model.configuration.outputMode,
+                    onSelectOutputMode: model.selectOutputMode
                 )
 
                 LazyVGrid(columns: columns, spacing: 12) {
@@ -226,6 +228,8 @@ private struct HubRecordingHero: View {
     var totalWords: Int
     var orbThemeOverride: String
     var isAnimationActive: Bool
+    var outputMode: DictationOutputMode
+    var onSelectOutputMode: (DictationOutputMode) -> Void
 
     var body: some View {
         HStack(spacing: 36) {
@@ -249,6 +253,11 @@ private struct HubRecordingHero: View {
                     .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(.white.opacity(0.5))
                     .frame(maxWidth: 470, alignment: .leading)
+
+                HubOutputModeSwitcher(
+                    selection: outputMode,
+                    onSelect: onSelectOutputMode
+                )
 
                 HStack(spacing: 9) {
                     HubKeycap("fn")
@@ -322,6 +331,92 @@ private struct HubRecordingHero: View {
                 )
         }
         .shadow(color: .black.opacity(0.18), radius: 22, y: 12)
+    }
+}
+
+private struct HubOutputModeSwitcher: View {
+    let selection: DictationOutputMode
+    let onSelect: (DictationOutputMode) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoveredMode: DictationOutputMode?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(DictationOutputMode.allCases, id: \.self) { mode in
+                Button {
+                    onSelect(mode)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: mode.systemSymbolName)
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(mode.displayName)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(
+                        selection == mode
+                            ? .white
+                            : .white.opacity(0.48)
+                    )
+                    .padding(.horizontal, 11)
+                    .frame(height: 28)
+                    .background {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(buttonBackground(for: mode))
+                    }
+                    .contentShape(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoveredMode = hovering ? mode : nil
+                }
+                .help("Use \(mode.displayName) for the next dictation")
+                .accessibilityLabel("\(mode.displayName) writing mode")
+                .accessibilityAddTraits(
+                    selection == mode ? .isSelected : []
+                )
+            }
+        }
+        .padding(3)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.black.opacity(0.22))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.085), lineWidth: 0.75)
+        }
+        .fixedSize()
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.16),
+            value: selection
+        )
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.14),
+            value: hoveredMode
+        )
+    }
+
+    private func buttonBackground(
+        for mode: DictationOutputMode
+    ) -> AnyShapeStyle {
+        if selection == mode {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        HubPalette.purple.opacity(0.72),
+                        HubPalette.purple.opacity(0.38)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+        return AnyShapeStyle(
+            Color.white.opacity(hoveredMode == mode ? 0.075 : 0)
+        )
     }
 }
 

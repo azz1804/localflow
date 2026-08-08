@@ -91,6 +91,36 @@ final class LocalFlowHubModelTests: XCTestCase {
         XCTAssertEqual(savedDictionary?.replacements["local flow"], "LocalFlow")
     }
 
+    @MainActor
+    func testSelectingOutputModeUpdatesImmediately() {
+        let model = LocalFlowHubModel()
+        var selectedMode: DictationOutputMode?
+        model.outputModeChangeHandler = { mode in
+            selectedMode = mode
+            return .success(())
+        }
+
+        model.selectOutputMode(.prompt)
+
+        XCTAssertEqual(model.configuration.outputMode, .prompt)
+        XCTAssertEqual(selectedMode, .prompt)
+        XCTAssertEqual(model.statusMessage, "Prompt mode active")
+    }
+
+    @MainActor
+    func testSelectingOutputModeRollsBackWhenPersistenceFails() {
+        let model = LocalFlowHubModel()
+        model.configuration.outputMode = .polish
+        model.outputModeChangeHandler = { _ in
+            .failure(OutputModeTestError.persistenceFailed)
+        }
+
+        model.selectOutputMode(.prompt)
+
+        XCTAssertEqual(model.configuration.outputMode, .polish)
+        XCTAssertTrue(model.statusIsError)
+    }
+
     private func record(text: String, app: String) -> DictationRecord {
         DictationRecord(
             targetApplication: TargetApplicationInfo(localizedName: app, bundleIdentifier: nil),
@@ -116,4 +146,8 @@ final class LocalFlowHubModelTests: XCTestCase {
             appPath: "/Applications/LocalFlow.app"
         )
     }
+}
+
+private enum OutputModeTestError: Error {
+    case persistenceFailed
 }

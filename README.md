@@ -127,6 +127,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, Polish, Prompt Mode, opening LocalFlow and quitting.
+- Switch instantly between Transcript, Polish, and Prompt from the Home dashboard. While recording, click the compact mode button beside the timer to cycle through the same three modes; the choice is saved automatically.
 - Enable `Prompt Mode` to remove speech artifacts and clarify the goal, context, constraints, and expected output without answering or inventing details. Prompt Mode and Polish are mutually exclusive.
 - Choose `Open History` from the menu bar icon for instant access to recent transcripts.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.

@@ -85,6 +85,7 @@ final class LocalFlowHubModel: ObservableObject {
     @Published var statusIsError = false
 
     var saveSettingsHandler: ((AppConfiguration) -> Result<Void, Error>)?
+    var outputModeChangeHandler: ((DictationOutputMode) -> Result<Void, Error>)?
     var saveDictionaryHandler: ((PersonalDictionary) -> Result<Void, Error>)?
     var clearHistoryHandler: (() -> Result<Void, Error>)?
     var refreshHandler: (() -> Void)?
@@ -164,6 +165,22 @@ final class LocalFlowHubModel: ObservableObject {
             showStatus("Pasted · saved to History")
         case .copiedToClipboard:
             showStatus("No text field selected · copied and saved to History")
+        }
+    }
+
+    func selectOutputMode(_ mode: DictationOutputMode) {
+        guard configuration.outputMode != mode else {
+            return
+        }
+
+        let previousMode = configuration.outputMode
+        configuration.outputMode = mode
+        switch outputModeChangeHandler?(mode) ?? .success(()) {
+        case .success:
+            showStatus("\(mode.displayName) mode active")
+        case let .failure(error):
+            configuration.outputMode = previousMode
+            showStatus(error.localizedDescription, isError: true)
         }
     }
 
@@ -291,6 +308,7 @@ final class LocalFlowHubModel: ObservableObject {
 @MainActor
 final class SettingsWindowController: NSWindowController {
     var onSaveSettings: ((AppConfiguration) -> Result<Void, Error>)?
+    var onChangeOutputMode: ((DictationOutputMode) -> Result<Void, Error>)?
     var onSaveDictionary: ((PersonalDictionary) -> Result<Void, Error>)?
     var onClearHistory: (() -> Result<Void, Error>)?
     var onRefresh: (() -> Void)?
@@ -368,6 +386,10 @@ final class SettingsWindowController: NSWindowController {
         model.showInsertionOutcome(outcome)
     }
 
+    func updateOutputMode(_ mode: DictationOutputMode) {
+        model.configuration.outputMode = mode
+    }
+
     func selectHomeTab() {
         model.selectedSection = .home
     }
@@ -375,6 +397,9 @@ final class SettingsWindowController: NSWindowController {
     private func configureModelActions() {
         model.saveSettingsHandler = { [weak self] configuration in
             self?.onSaveSettings?(configuration) ?? .success(())
+        }
+        model.outputModeChangeHandler = { [weak self] mode in
+            self?.onChangeOutputMode?(mode) ?? .success(())
         }
         model.saveDictionaryHandler = { [weak self] dictionary in
             self?.onSaveDictionary?(dictionary) ?? .success(())

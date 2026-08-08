@@ -233,6 +233,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let floatingBarController = FloatingBarController()
+        floatingBarController.onOutputModeChange = { [weak self] mode in
+            guard let self else {
+                return
+            }
+            if case let .failure(error) = self.applyOutputMode(mode) {
+                self.floatingBarController?.update(
+                    status: .error(error.localizedDescription)
+                )
+            }
+        }
         dictationController.onStatusChanged = { [weak self] status, visualization in
             self?.floatingBarController?.update(
                 status: status,
@@ -585,14 +595,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func toggleOutputMode(_ requestedMode: DictationOutputMode) {
-        guard let dictationController else {
-            return
-        }
-
-        configuration.outputMode = configuration.outputMode == requestedMode
+        let mode = configuration.outputMode == requestedMode
             ? .transcript
             : requestedMode
-        dictationController.updateConfiguration(
+        if case let .failure(error) = applyOutputMode(mode) {
+            floatingBarController?.update(
+                status: .error(error.localizedDescription)
+            )
+        }
+    }
+
+    private func applyOutputMode(
+        _ mode: DictationOutputMode
+    ) -> Result<Void, Error> {
+        let previousMode = configuration.outputMode
+        configuration.outputMode = mode
+        dictationController?.updateConfiguration(
             configuration,
             dictionary: dictionary
         )
@@ -602,16 +620,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let url = appSupportURL.appendingPathComponent(".env")
             try ConfigurationStore.save(configuration, to: url)
             envSourceURL = url
+            settingsWindowController?.updateOutputMode(mode)
             LocalFlowLogger.log(
                 "Output mode changed mode=\(configuration.outputMode.rawValue) promptModel=\(configuration.promptModel)"
             )
+            return .success(())
         } catch {
+            configuration.outputMode = previousMode
+            dictationController?.updateConfiguration(
+                configuration,
+                dictionary: dictionary
+            )
+            updateOutputModeMenuItems()
+            settingsWindowController?.updateOutputMode(previousMode)
             LocalFlowLogger.log(
                 "Output mode persistence failed error=\(error.localizedDescription)"
             )
-            floatingBarController?.update(
-                status: .error("Could not save the writing mode.")
-            )
+            return .failure(error)
         }
     }
 
@@ -929,6 +954,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 return .failure(error)
             }
+        }
+
+        controller.onChangeOutputMode = { [weak self] mode in
+            self?.applyOutputMode(mode) ?? .success(())
         }
 
         controller.onSaveDictionary = { [weak self] updatedDictionary in
