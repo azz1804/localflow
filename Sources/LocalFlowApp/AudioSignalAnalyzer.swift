@@ -1083,7 +1083,7 @@ final class AudioCaptureSink: @unchecked Sendable {
 
 @MainActor
 final class MicrophoneAudioCapture {
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
     private let accumulator = SignalAccumulator()
     private var captureSink: AudioCaptureSink?
     private var analysisWorker: AudioAnalysisWorker?
@@ -1094,6 +1094,8 @@ final class MicrophoneAudioCapture {
     func start(recordingURL: URL) throws {
         try? stop()
 
+        let engine = AVAudioEngine()
+        self.engine = engine
         let input = engine.inputNode
         let currentFormat = input.outputFormat(forBus: 0)
         guard currentFormat.channelCount > 0,
@@ -1144,11 +1146,21 @@ final class MicrophoneAudioCapture {
             self.captureSink = nil
             self.drainNode = nil
             engine.reset()
+            self.engine = nil
             throw error
         }
     }
 
     func stop() throws {
+        guard let engine else {
+            analysisWorker?.stop()
+            analysisWorker = nil
+            let captureSink = captureSink
+            self.captureSink = nil
+            try captureSink?.finish()
+            return
+        }
+
         if isRunning {
             engine.stop()
             isRunning = false
@@ -1167,7 +1179,10 @@ final class MicrophoneAudioCapture {
 
         let captureSink = captureSink
         self.captureSink = nil
-        defer { engine.reset() }
+        defer {
+            engine.reset()
+            self.engine = nil
+        }
         try captureSink?.finish()
     }
 

@@ -280,7 +280,10 @@ final class DictationController {
             LocalFlowLogger.log(
                 "Recording start target=\(recordingTargetApplication?.bundleIdentifier ?? "-")"
             )
-            try await audioRecorder.start()
+            try await audioRecorder.start(
+                preferBuiltInMicrophoneForBluetooth:
+                    configuration.preferBuiltInMicrophoneForBluetooth
+            )
             recordingStartedAt = Date()
             isStarting = false
             LocalFlowLogger.log("Recording started")

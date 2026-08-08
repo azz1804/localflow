@@ -122,6 +122,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
 - Press `Escape` to discard the active recording without transcribing or pasting it.
+- When AirPods or another Bluetooth headset is selected as the microphone, LocalFlow uses the built-in Mac microphone by default to preserve high-quality Bluetooth playback. Disable `Protect AirPods audio` in Settings if you explicitly want the headset microphone.
 - Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
