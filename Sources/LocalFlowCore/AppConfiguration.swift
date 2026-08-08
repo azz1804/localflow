@@ -13,6 +13,7 @@ public struct AppConfiguration: Equatable, Sendable {
     public var restoreClipboardAfterPaste: Bool
     public var pasteRestoreDelayMilliseconds: Int
     public var orbThemeOverride: String
+    public var preferBuiltInMicrophoneForBluetooth: Bool
 
     public var isOpenAIConfigured: Bool {
         guard let openAIAPIKey else {
@@ -35,7 +36,8 @@ public struct AppConfiguration: Equatable, Sendable {
         historyRetentionDays: Int = 0,
         restoreClipboardAfterPaste: Bool = true,
         pasteRestoreDelayMilliseconds: Int = 900,
-        orbThemeOverride: String = "automatic"
+        orbThemeOverride: String = "automatic",
+        preferBuiltInMicrophoneForBluetooth: Bool = true
     ) {
         self.openAIAPIKey = openAIAPIKey
         self.transcriptionModel = transcriptionModel
@@ -49,6 +51,7 @@ public struct AppConfiguration: Equatable, Sendable {
         self.restoreClipboardAfterPaste = restoreClipboardAfterPaste
         self.pasteRestoreDelayMilliseconds = pasteRestoreDelayMilliseconds
         self.orbThemeOverride = orbThemeOverride
+        self.preferBuiltInMicrophoneForBluetooth = preferBuiltInMicrophoneForBluetooth
     }
 
     public init(env: [String: String]) {
@@ -64,7 +67,11 @@ public struct AppConfiguration: Equatable, Sendable {
             historyRetentionDays: Self.intValue(env["HISTORY_RETENTION_DAYS"], default: 0),
             restoreClipboardAfterPaste: Self.boolValue(env["RESTORE_CLIPBOARD_AFTER_PASTE"], default: true),
             pasteRestoreDelayMilliseconds: Self.intValue(env["PASTE_RESTORE_DELAY_MS"], default: 900),
-            orbThemeOverride: env["ORB_THEME"]?.nonEmpty ?? "automatic"
+            orbThemeOverride: env["ORB_THEME"]?.nonEmpty ?? "automatic",
+            preferBuiltInMicrophoneForBluetooth: Self.boolValue(
+                env["PREFER_BUILT_IN_MIC_FOR_BLUETOOTH"],
+                default: true
+            )
         )
     }
 
@@ -81,7 +88,11 @@ public struct AppConfiguration: Equatable, Sendable {
             ("HISTORY_RETENTION_DAYS", String(historyRetentionDays)),
             ("RESTORE_CLIPBOARD_AFTER_PASTE", restoreClipboardAfterPaste ? "true" : "false"),
             ("PASTE_RESTORE_DELAY_MS", String(pasteRestoreDelayMilliseconds)),
-            ("ORB_THEME", orbThemeOverride)
+            ("ORB_THEME", orbThemeOverride),
+            (
+                "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH",
+                preferBuiltInMicrophoneForBluetooth ? "true" : "false"
+            )
         ]
 
         return values

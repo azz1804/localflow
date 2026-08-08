@@ -223,6 +223,25 @@ struct LocalFlowSettingsView: View {
                 }
 
                 HubSettingsSection(
+                    symbol: "airpodspro",
+                    title: "Audio input",
+                    subtitle: "Keep Bluetooth playback clear while LocalFlow listens."
+                ) {
+                    HubSettingRow(
+                        label: "Protect AirPods audio",
+                        help: "When a Bluetooth headset is the active microphone, LocalFlow automatically uses the Mac microphone instead. This prevents macOS from switching the headset into low-quality call mode."
+                    ) {
+                        Toggle(
+                            "",
+                            isOn: $model.configuration
+                                .preferBuiltInMicrophoneForBluetooth
+                        )
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                    }
+                }
+
+                HubSettingsSection(
                     symbol: "keyboard",
                     title: "Shortcuts",
                     subtitle: "Global shortcuts work while LocalFlow runs in the background."

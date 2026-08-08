@@ -27,7 +27,8 @@ final class EnvLoaderTests: XCTestCase {
             "ENABLE_POLISH": "yes",
             "HISTORY_RETENTION_DAYS": "14",
             "PASTE_RESTORE_DELAY_MS": "1200",
-            "ORB_THEME": "solar-nova"
+            "ORB_THEME": "solar-nova",
+            "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH": "false"
         ])
 
         XCTAssertTrue(configuration.isOpenAIConfigured)
@@ -37,6 +38,7 @@ final class EnvLoaderTests: XCTestCase {
         XCTAssertEqual(configuration.historyRetentionDays, 14)
         XCTAssertEqual(configuration.pasteRestoreDelayMilliseconds, 1200)
         XCTAssertEqual(configuration.orbThemeOverride, "solar-nova")
+        XCTAssertFalse(configuration.preferBuiltInMicrophoneForBluetooth)
     }
 
     func testNonPositiveHistoryRetentionUsesForeverWithoutAllowingNegatives() {
@@ -64,13 +66,24 @@ final class EnvLoaderTests: XCTestCase {
             historyRetentionDays: 45,
             restoreClipboardAfterPaste: false,
             pasteRestoreDelayMilliseconds: 500,
-            orbThemeOverride: "cosmic-ink"
+            orbThemeOverride: "cosmic-ink",
+            preferBuiltInMicrophoneForBluetooth: false
         )
 
         let parsed = EnvLoader.parse(configuration.envFileContents())
         let roundTripped = AppConfiguration(env: parsed)
 
         XCTAssertEqual(roundTripped, configuration)
+    }
+
+    func testBluetoothInputProtectionDefaultsToEnabled() {
+        XCTAssertTrue(
+            AppConfiguration().preferBuiltInMicrophoneForBluetooth
+        )
+        XCTAssertTrue(
+            AppConfiguration(env: [:])
+                .preferBuiltInMicrophoneForBluetooth
+        )
     }
 
     func testConfigurationStoreRestrictsAPIKeyFilePermissions() throws {

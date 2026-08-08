@@ -1,4 +1,5 @@
 import Accelerate
+import AudioToolbox
 import AVFoundation
 import Foundation
 
@@ -139,7 +140,9 @@ final class AudioRecorder {
         recordingURL != nil
     }
 
-    func start() async throws {
+    func start(
+        preferBuiltInMicrophoneForBluetooth: Bool = true
+    ) async throws {
         guard !isRecording else {
             throw AudioRecorderError.alreadyRecording
         }
@@ -154,7 +157,26 @@ final class AudioRecorder {
             .appendingPathExtension("wav")
 
         do {
-            try capture.start(recordingURL: url)
+            let route: AudioInputRoutePreparation?
+            do {
+                route = try await AudioInputRouteManager
+                    .preparePreferredInput(
+                        preferBuiltInForBluetooth:
+                            preferBuiltInMicrophoneForBluetooth
+                    )
+            } catch {
+                // Route protection is best-effort: a transient CoreAudio
+                // enumeration failure must not prevent dictation entirely.
+                // The fresh capture graph below can still use the active mic.
+                LocalFlowLogger.log(
+                    "Audio route preparation unavailable error=\(error.localizedDescription); continuing with active input"
+                )
+                route = nil
+            }
+            try await startCaptureWithRouteRecovery(
+                recordingURL: url,
+                route: route
+            )
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o600],
                 ofItemAtPath: url.path
@@ -167,6 +189,28 @@ final class AudioRecorder {
             try? capture.stop()
             try? FileManager.default.removeItem(at: url)
             throw error
+        }
+    }
+
+    private func startCaptureWithRouteRecovery(
+        recordingURL: URL,
+        route: AudioInputRoutePreparation?
+    ) async throws {
+        do {
+            try capture.start(recordingURL: recordingURL)
+        } catch {
+            let errorCode = (error as NSError).code
+            guard route?.didSwitchDevice == true
+                    || errorCode == Int(kAudioUnitErr_FormatNotSupported) else {
+                throw error
+            }
+
+            LocalFlowLogger.log(
+                "Audio capture retry after route transition code=\(errorCode) selected=\(route?.selectedDevice.name ?? "active-input")"
+            )
+            try? capture.stop()
+            try await Task.sleep(for: .milliseconds(180))
+            try capture.start(recordingURL: recordingURL)
         }
     }
 
