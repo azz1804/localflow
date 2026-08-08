@@ -1881,7 +1881,12 @@ struct LocalFlowHistoryView: View {
                                     text: HubFormat.preciseDuration(duration)
                                 )
                             }
-                            if record.polished {
+                            if record.resolvedOutputMode == .prompt {
+                                HubInfoPill(
+                                    symbol: "text.badge.sparkles",
+                                    text: "Prompt Mode"
+                                )
+                            } else if record.resolvedOutputMode == .polish {
                                 HubInfoPill(symbol: "sparkles", text: "Polished")
                             }
                         }

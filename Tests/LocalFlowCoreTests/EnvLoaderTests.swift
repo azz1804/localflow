@@ -28,13 +28,18 @@ final class EnvLoaderTests: XCTestCase {
             "HISTORY_RETENTION_DAYS": "14",
             "PASTE_RESTORE_DELAY_MS": "1200",
             "ORB_THEME": "solar-nova",
+            "ENABLE_PROMPT_MODE": "true",
+            "PROMPT_MODEL": "gpt-prompt-test",
             "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH": "false"
         ])
 
         XCTAssertTrue(configuration.isOpenAIConfigured)
         XCTAssertEqual(configuration.transcriptionModel, "gpt-4o-mini-transcribe")
         XCTAssertEqual(configuration.transcriptionLanguage, "fr")
-        XCTAssertTrue(configuration.enablePolish)
+        XCTAssertFalse(configuration.enablePolish)
+        XCTAssertTrue(configuration.enablePromptMode)
+        XCTAssertEqual(configuration.outputMode, .prompt)
+        XCTAssertEqual(configuration.promptModel, "gpt-prompt-test")
         XCTAssertEqual(configuration.historyRetentionDays, 14)
         XCTAssertEqual(configuration.pasteRestoreDelayMilliseconds, 1200)
         XCTAssertEqual(configuration.orbThemeOverride, "solar-nova")
@@ -60,6 +65,8 @@ final class EnvLoaderTests: XCTestCase {
             transcriptionLanguage: "fr",
             enablePolish: true,
             polishModel: "gpt-4o-mini",
+            enablePromptMode: false,
+            promptModel: "gpt-5.4-nano",
             holdHotkey: "fn",
             fallbackHoldHotkey: "option+space",
             toggleHotkey: "fn+space",
@@ -84,6 +91,20 @@ final class EnvLoaderTests: XCTestCase {
             AppConfiguration(env: [:])
                 .preferBuiltInMicrophoneForBluetooth
         )
+    }
+
+    func testPromptModeDefaultsToOffAndIsExclusiveWithPolish() {
+        XCTAssertFalse(AppConfiguration().enablePromptMode)
+        XCTAssertEqual(AppConfiguration().promptModel, "gpt-5.4-nano")
+
+        var configuration = AppConfiguration(enablePolish: true)
+        XCTAssertEqual(configuration.outputMode, .polish)
+        configuration.outputMode = .prompt
+        XCTAssertFalse(configuration.enablePolish)
+        XCTAssertTrue(configuration.enablePromptMode)
+        configuration.outputMode = .transcript
+        XCTAssertFalse(configuration.enablePolish)
+        XCTAssertFalse(configuration.enablePromptMode)
     }
 
     func testConfigurationStoreRestrictsAPIKeyFilePermissions() throws {

@@ -9,7 +9,12 @@ public struct DictationRecord: Codable, Equatable, Identifiable, Sendable {
     public var transcribedText: String
     public var finalText: String
     public var polished: Bool
+    public var outputMode: DictationOutputMode?
     public var durationSeconds: TimeInterval?
+
+    public var resolvedOutputMode: DictationOutputMode {
+        outputMode ?? (polished ? .polish : .transcript)
+    }
 
     public init(
         id: UUID = UUID(),
@@ -18,6 +23,7 @@ public struct DictationRecord: Codable, Equatable, Identifiable, Sendable {
         transcribedText: String,
         finalText: String,
         polished: Bool,
+        outputMode: DictationOutputMode? = nil,
         durationSeconds: TimeInterval?
     ) {
         self.id = id
@@ -26,6 +32,7 @@ public struct DictationRecord: Codable, Equatable, Identifiable, Sendable {
         self.transcribedText = transcribedText
         self.finalText = finalText
         self.polished = polished
+        self.outputMode = outputMode
         self.durationSeconds = durationSeconds
     }
 }

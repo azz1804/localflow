@@ -10,7 +10,16 @@ final class DictationController {
 
     var isPolishEnabled: Bool {
         get { configuration.enablePolish }
-        set { configuration.enablePolish = newValue }
+        set {
+            configuration.outputMode = newValue ? .polish : .transcript
+        }
+    }
+
+    var isPromptModeEnabled: Bool {
+        get { configuration.enablePromptMode }
+        set {
+            configuration.outputMode = newValue ? .prompt : .transcript
+        }
     }
 
     var canCancelRecording: Bool {
@@ -567,6 +576,8 @@ final class DictationController {
             transcriptionLanguage: configuration.transcriptionLanguage,
             enablePolish: configuration.enablePolish,
             polishModel: configuration.polishModel,
+            outputMode: configuration.outputMode,
+            promptModel: configuration.promptModel,
             dictionary: dictionary
         )
     }
@@ -841,8 +852,36 @@ final class DictationController {
             to: transcribedText
         )
         var polished = false
+        var outputMode = DictationOutputMode.transcript
 
-        if parameters.enablePolish {
+        switch parameters.resolvedOutputMode {
+        case .prompt:
+            do {
+                let promptStartedAt = ProcessInfo.processInfo.systemUptime
+                finalText = try await client.rewriteAsPrompt(
+                    text: finalText,
+                    model: parameters.promptModel ?? "gpt-5.4-nano",
+                    systemPrompt: PromptBuilder.promptModeSystemPrompt(
+                        targetApplication: job.targetApplication
+                    ),
+                    userPrompt: PromptBuilder.promptModeUserPrompt(
+                        text: finalText
+                    )
+                )
+                try Task.checkCancellation()
+                polished = true
+                outputMode = .prompt
+                LocalFlowLogger.log(
+                    "Prompt Mode finished chars=\(finalText.count) durationMs=\(Int(((ProcessInfo.processInfo.systemUptime - promptStartedAt) * 1_000).rounded())) model=\(parameters.promptModel ?? "gpt-5.4-nano")"
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                LocalFlowLogger.log(
+                    "Prompt Mode failed; using raw transcript error=\(error.localizedDescription)"
+                )
+            }
+        case .polish:
             do {
                 finalText = try await client.polish(
                     text: finalText,
@@ -854,19 +893,23 @@ final class DictationController {
                 )
                 try Task.checkCancellation()
                 polished = true
+                outputMode = .polish
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                // Polish is optional: a valid raw transcript always wins over
-                // losing the user's dictation because a second request failed.
+                // Both optional rewrite modes fall back to the valid raw
+                // transcript instead of losing a dictation on a second call.
                 LocalFlowLogger.log(
                     "Polish failed; using raw transcript error=\(error.localizedDescription)"
                 )
             }
+        case .transcript:
+            break
         }
 
         job.finalText = finalText
         job.polished = polished
+        job.outputMode = outputMode
         job.stage = .ready
         try await pendingDictationStore.save(job)
         return job

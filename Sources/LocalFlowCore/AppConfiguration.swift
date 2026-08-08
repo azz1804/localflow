@@ -1,11 +1,19 @@
 import Foundation
 
+public enum DictationOutputMode: String, Codable, CaseIterable, Sendable {
+    case transcript
+    case polish
+    case prompt
+}
+
 public struct AppConfiguration: Equatable, Sendable {
     public var openAIAPIKey: String?
     public var transcriptionModel: String
     public var transcriptionLanguage: String
     public var enablePolish: Bool
     public var polishModel: String
+    public var enablePromptMode: Bool
+    public var promptModel: String
     public var holdHotkey: String
     public var fallbackHoldHotkey: String
     public var toggleHotkey: String
@@ -14,6 +22,19 @@ public struct AppConfiguration: Equatable, Sendable {
     public var pasteRestoreDelayMilliseconds: Int
     public var orbThemeOverride: String
     public var preferBuiltInMicrophoneForBluetooth: Bool
+
+    public var outputMode: DictationOutputMode {
+        get {
+            if enablePromptMode {
+                return .prompt
+            }
+            return enablePolish ? .polish : .transcript
+        }
+        set {
+            enablePolish = newValue == .polish
+            enablePromptMode = newValue == .prompt
+        }
+    }
 
     public var isOpenAIConfigured: Bool {
         guard let openAIAPIKey else {
@@ -30,6 +51,8 @@ public struct AppConfiguration: Equatable, Sendable {
         transcriptionLanguage: String = "fr",
         enablePolish: Bool = false,
         polishModel: String = "gpt-4o-mini",
+        enablePromptMode: Bool = false,
+        promptModel: String = "gpt-5.4-nano",
         holdHotkey: String = "fn",
         fallbackHoldHotkey: String = "option+space",
         toggleHotkey: String = "fn+space",
@@ -42,8 +65,10 @@ public struct AppConfiguration: Equatable, Sendable {
         self.openAIAPIKey = openAIAPIKey
         self.transcriptionModel = transcriptionModel
         self.transcriptionLanguage = transcriptionLanguage
-        self.enablePolish = enablePolish
+        self.enablePolish = enablePromptMode ? false : enablePolish
         self.polishModel = polishModel
+        self.enablePromptMode = enablePromptMode
+        self.promptModel = promptModel
         self.holdHotkey = holdHotkey
         self.fallbackHoldHotkey = fallbackHoldHotkey
         self.toggleHotkey = toggleHotkey
@@ -61,6 +86,11 @@ public struct AppConfiguration: Equatable, Sendable {
             transcriptionLanguage: env["TRANSCRIPTION_LANGUAGE"]?.nonEmpty ?? "fr",
             enablePolish: Self.boolValue(env["ENABLE_POLISH"], default: false),
             polishModel: env["POLISH_MODEL"]?.nonEmpty ?? "gpt-4o-mini",
+            enablePromptMode: Self.boolValue(
+                env["ENABLE_PROMPT_MODE"],
+                default: false
+            ),
+            promptModel: env["PROMPT_MODEL"]?.nonEmpty ?? "gpt-5.4-nano",
             holdHotkey: env["HOLD_HOTKEY"]?.nonEmpty ?? "fn",
             fallbackHoldHotkey: env["FALLBACK_HOLD_HOTKEY"]?.nonEmpty ?? "option+space",
             toggleHotkey: env["TOGGLE_HOTKEY"]?.nonEmpty ?? "fn+space",
@@ -82,6 +112,8 @@ public struct AppConfiguration: Equatable, Sendable {
             ("TRANSCRIPTION_LANGUAGE", transcriptionLanguage),
             ("ENABLE_POLISH", enablePolish ? "true" : "false"),
             ("POLISH_MODEL", polishModel),
+            ("ENABLE_PROMPT_MODE", enablePromptMode ? "true" : "false"),
+            ("PROMPT_MODEL", promptModel),
             ("HOLD_HOTKEY", holdHotkey),
             ("FALLBACK_HOLD_HOTKEY", fallbackHoldHotkey),
             ("TOGGLE_HOTKEY", toggleHotkey),

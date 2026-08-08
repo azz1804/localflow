@@ -23,4 +23,22 @@ final class PromptBuilderTests: XCTestCase {
         XCTAssertTrue(prompt.contains("casual spoken style"))
         XCTAssertTrue(prompt.contains("Return only the final text"))
     }
+
+    func testPromptModePreservesCodingDetailsWithoutAnswering() {
+        let systemPrompt = PromptBuilder.promptModeSystemPrompt(
+            targetApplication: TargetApplicationInfo(
+                localizedName: "Codex",
+                bundleIdentifier: "com.openai.codex"
+            )
+        )
+        let userPrompt = PromptBuilder.promptModeUserPrompt(
+            text: "corrige App.swift et lance swift test"
+        )
+
+        XCTAssertTrue(systemPrompt.contains("Do not answer the request"))
+        XCTAssertTrue(systemPrompt.contains("paths, flags, error messages"))
+        XCTAssertTrue(systemPrompt.contains("If the request is already clear"))
+        XCTAssertTrue(userPrompt.contains("<dictation>"))
+        XCTAssertTrue(userPrompt.contains("corrige App.swift"))
+    }
 }

@@ -70,8 +70,10 @@ enum LocalFlowUIPreviewRenderer {
             colorScheme: .dark,
             to: outputDirectory.appendingPathComponent("localflow-insights.png")
         )
+        let settingsModel = makeModel()
+        settingsModel.configuration.outputMode = .prompt
         try renderHub(
-            model: model,
+            model: settingsModel,
             section: .settings,
             colorScheme: .dark,
             to: outputDirectory.appendingPathComponent("localflow-settings.png")
@@ -86,6 +88,14 @@ enum LocalFlowUIPreviewRenderer {
             hovered: false,
             orbThemeOverride: "automatic",
             to: outputDirectory.appendingPathComponent("localflow-flowbar.png")
+        )
+        try renderFloatingBar(
+            hovered: false,
+            outputMode: .prompt,
+            orbThemeOverride: "automatic",
+            to: outputDirectory.appendingPathComponent(
+                "localflow-flowbar-prompt-mode.png"
+            )
         )
         try renderFloatingBar(
             hovered: true,
@@ -144,6 +154,7 @@ enum LocalFlowUIPreviewRenderer {
     private static func renderFloatingBar(
         hovered: Bool,
         processing: Bool = false,
+        outputMode: DictationOutputMode = .transcript,
         orbThemeOverride: String,
         to outputURL: URL
     ) throws {
@@ -167,6 +178,7 @@ enum LocalFlowUIPreviewRenderer {
             totalWords: 0,
             overrideID: orbThemeOverride
         )
+        view.updateOutputMode(outputMode)
 
         let liveEnvelope: [Float] = [
             0.74, 0.92, 0.7, 0.82, 0.54, 0.68, 0.4,

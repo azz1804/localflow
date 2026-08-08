@@ -5,19 +5,29 @@ public struct PendingDictationParameters: Codable, Equatable, Sendable {
     public var transcriptionLanguage: String
     public var enablePolish: Bool
     public var polishModel: String
+    public var outputMode: DictationOutputMode?
+    public var promptModel: String?
     public var dictionary: PersonalDictionary
+
+    public var resolvedOutputMode: DictationOutputMode {
+        outputMode ?? (enablePolish ? .polish : .transcript)
+    }
 
     public init(
         transcriptionModel: String,
         transcriptionLanguage: String,
         enablePolish: Bool,
         polishModel: String,
+        outputMode: DictationOutputMode? = nil,
+        promptModel: String? = nil,
         dictionary: PersonalDictionary
     ) {
         self.transcriptionModel = transcriptionModel
         self.transcriptionLanguage = transcriptionLanguage
         self.enablePolish = enablePolish
         self.polishModel = polishModel
+        self.outputMode = outputMode
+        self.promptModel = promptModel
         self.dictionary = dictionary
     }
 }
@@ -41,6 +51,7 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
     public var transcribedText: String?
     public var finalText: String?
     public var polished: Bool
+    public var outputMode: DictationOutputMode?
     public var emptyTranscriptionResponseCount: Int?
 
     public init(
@@ -55,6 +66,7 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
         transcribedText: String? = nil,
         finalText: String? = nil,
         polished: Bool = false,
+        outputMode: DictationOutputMode? = nil,
         emptyTranscriptionResponseCount: Int? = nil
     ) {
         self.id = id
@@ -72,6 +84,7 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
         self.transcribedText = transcribedText
         self.finalText = finalText
         self.polished = polished
+        self.outputMode = outputMode
         self.emptyTranscriptionResponseCount = emptyTranscriptionResponseCount
     }
 
@@ -87,6 +100,7 @@ public struct PendingDictationJob: Codable, Equatable, Identifiable, Sendable {
             transcribedText: transcribedText,
             finalText: finalText,
             polished: polished,
+            outputMode: outputMode,
             durationSeconds: durationSeconds
         )
     }

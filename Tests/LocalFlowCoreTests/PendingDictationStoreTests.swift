@@ -3,6 +3,49 @@ import XCTest
 @testable import LocalFlowCore
 
 final class PendingDictationStoreTests: XCTestCase {
+    func testPromptModeMetadataSurvivesPendingAndHistoryRoundTrip() throws {
+        let job = PendingDictationJob(
+            durationSeconds: 2.5,
+            targetApplication: nil,
+            parameters: PendingDictationParameters(
+                transcriptionModel: "transcribe",
+                transcriptionLanguage: "fr",
+                enablePolish: false,
+                polishModel: "polish",
+                outputMode: .prompt,
+                promptModel: "gpt-5.4-nano",
+                dictionary: .empty
+            ),
+            stage: .ready,
+            transcribedText: "texte parlé",
+            finalText: "Objectif : créer la feature.",
+            polished: true,
+            outputMode: .prompt
+        )
+
+        let data = try JSONEncoder().encode(job)
+        let restored = try JSONDecoder().decode(
+            PendingDictationJob.self,
+            from: data
+        )
+
+        XCTAssertEqual(restored.parameters.resolvedOutputMode, .prompt)
+        XCTAssertEqual(restored.parameters.promptModel, "gpt-5.4-nano")
+        XCTAssertEqual(restored.makeHistoryRecord()?.resolvedOutputMode, .prompt)
+    }
+
+    func testLegacyPendingParametersResolveToPolishWithoutNewFields() throws {
+        let legacyJSON = #"{"transcriptionModel":"transcribe","transcriptionLanguage":"fr","enablePolish":true,"polishModel":"polish","dictionary":{"terms":[],"replacements":{}}}"#
+
+        let parameters = try JSONDecoder().decode(
+            PendingDictationParameters.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertEqual(parameters.resolvedOutputMode, .polish)
+        XCTAssertNil(parameters.promptModel)
+    }
+
     func testRecordingSurvivesCheckpointsAndCreatesStableHistoryRecord() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

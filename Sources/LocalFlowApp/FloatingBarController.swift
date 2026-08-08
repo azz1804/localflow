@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LocalFlowCore
 import QuartzCore
 
 /// A synchronous foreign callback can safely carry its arguments across the
@@ -236,6 +237,10 @@ final class FloatingBarController {
         )
     }
 
+    func updateOutputMode(_ mode: DictationOutputMode) {
+        contentView.updateOutputMode(mode)
+    }
+
     private func positionPanel() {
         guard let screen = NSScreen.main else {
             return
@@ -300,6 +305,7 @@ final class FloatingBarView: NSView {
     private static let spectrumBarCount = displayedSegmentCount * 2 - 1
 
     private var status: AppStatus = .idle
+    private var outputMode = DictationOutputMode.transcript
     private var displayedEnvelope = Array(
         repeating: Float(0),
         count: envelopeSegmentCount
@@ -936,6 +942,14 @@ final class FloatingBarView: NSView {
         needsDisplay = true
     }
 
+    func updateOutputMode(_ mode: DictationOutputMode) {
+        guard outputMode != mode else {
+            return
+        }
+        outputMode = mode
+        needsDisplay = true
+    }
+
     func setHoveredForPreview(_ hovered: Bool, location: NSPoint) {
         hoverLocation = location
         isHovered = hovered
@@ -1276,7 +1290,8 @@ final class FloatingBarView: NSView {
             totalSeconds / 60,
             totalSeconds % 60
         )
-        let capsuleWidth: CGFloat = 49
+        let showsPromptMode = outputMode == .prompt
+        let capsuleWidth: CGFloat = showsPromptMode ? 65 : 49
         let capsuleRect = NSRect(
             x: cardRect.maxX - capsuleWidth - 9,
             y: cardRect.midY - 10.5,
@@ -1295,15 +1310,36 @@ final class FloatingBarView: NSView {
             )
         ]
         let timerSize = value.size(withAttributes: timerAttributes)
+        let timerCenterX = capsuleRect.midX + (showsPromptMode ? 7 : 0)
         value.draw(
             in: NSRect(
-                x: capsuleRect.midX - timerSize.width / 2,
+                x: timerCenterX - timerSize.width / 2,
                 y: capsuleRect.midY - timerSize.height / 2,
                 width: ceil(timerSize.width),
                 height: ceil(timerSize.height)
             ),
             withAttributes: timerAttributes
         )
+
+        if showsPromptMode {
+            let promptMark = "✦" as NSString
+            let promptMarkAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+                .foregroundColor: barPalette.spectrumCenter.nsColor(
+                    alpha: isHovered ? 0.95 : 0.78
+                )
+            ]
+            let promptMarkSize = promptMark.size(
+                withAttributes: promptMarkAttributes
+            )
+            promptMark.draw(
+                at: NSPoint(
+                    x: capsuleRect.minX + 8,
+                    y: capsuleRect.midY - promptMarkSize.height / 2
+                ),
+                withAttributes: promptMarkAttributes
+            )
+        }
     }
 
     private func drawTimerCapsule(

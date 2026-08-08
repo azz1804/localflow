@@ -28,6 +28,7 @@ public enum OpenAIClientError: Error, LocalizedError {
     case badStatus(Int, String)
     case emptyTranscription
     case emptyPolishResponse
+    case emptyPromptResponse
     case audioFileUnavailable
     case audioFileEmpty
     case audioFileTooLarge(actualBytes: Int64, maximumBytes: Int64)
@@ -46,6 +47,8 @@ public enum OpenAIClientError: Error, LocalizedError {
             return "OpenAI returned an empty transcription."
         case .emptyPolishResponse:
             return "OpenAI returned an empty polish response."
+        case .emptyPromptResponse:
+            return "OpenAI returned an empty Prompt Mode response."
         case .audioFileUnavailable:
             return "The audio recording is no longer available."
         case .audioFileEmpty:
@@ -216,6 +219,59 @@ public final class OpenAIClient: @unchecked Sendable {
         return polishedText
     }
 
+    public func rewriteAsPrompt(
+        text: String,
+        model: String,
+        systemPrompt: String,
+        userPrompt: String
+    ) async throws -> String {
+        try Task.checkCancellation()
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw OpenAIClientError.missingAPIKey
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw OpenAIClientError.emptyTranscription
+        }
+        guard let url = URL(string: "https://api.openai.com/v1/responses") else {
+            throw OpenAIClientError.invalidURL
+        }
+
+        let payload = PromptModeResponseRequest(
+            model: model,
+            instructions: systemPrompt,
+            input: userPrompt,
+            reasoning: .init(effort: "none"),
+            text: .init(verbosity: "low"),
+            maxOutputTokens: 4_096,
+            store: false
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = Self.promptModeRequestTimeout
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await send(request)
+        try validate(response: response, data: data)
+
+        let decoded = try JSONDecoder().decode(
+            PromptModeResponse.self,
+            from: data
+        )
+        let prompt = decoded.output
+            .flatMap { $0.content ?? [] }
+            .filter { $0.type == "output_text" }
+            .compactMap(\.text)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else {
+            throw OpenAIClientError.emptyPromptResponse
+        }
+        return prompt
+    }
+
     private func send(
         _ request: URLRequest,
         uploadFileURL: URL? = nil
@@ -353,6 +409,7 @@ public final class OpenAIClient: @unchecked Sendable {
     private static let maximumAudioUploadByteCount: Int64 = 25 * 1_024 * 1_024
     private static let transcriptionRequestTimeout: TimeInterval = 90
     private static let polishRequestTimeout: TimeInterval = 45
+    private static let promptModeRequestTimeout: TimeInterval = 30
     private static let maximumErrorBodyByteCount = 8 * 1_024
 }
 
@@ -377,4 +434,45 @@ private struct ChatCompletionResponse: Decodable {
     struct Choice: Decodable {
         var message: ChatMessage
     }
+}
+
+private struct PromptModeResponseRequest: Encodable {
+    struct Reasoning: Encodable {
+        var effort: String
+    }
+
+    struct TextOptions: Encodable {
+        var verbosity: String
+    }
+
+    var model: String
+    var instructions: String
+    var input: String
+    var reasoning: Reasoning
+    var text: TextOptions
+    var maxOutputTokens: Int
+    var store: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case instructions
+        case input
+        case reasoning
+        case text
+        case maxOutputTokens = "max_output_tokens"
+        case store
+    }
+}
+
+private struct PromptModeResponse: Decodable {
+    struct OutputItem: Decodable {
+        var content: [Content]?
+    }
+
+    struct Content: Decodable {
+        var type: String
+        var text: String?
+    }
+
+    var output: [OutputItem]
 }

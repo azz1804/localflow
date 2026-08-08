@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
+    private let promptModeMenuItem = NSMenuItem(title: "Prompt Mode", action: #selector(togglePromptMode), keyEquivalent: "")
     private let hotkeyStatusMenuItem = NSMenuItem(title: "Hotkeys: Starting", action: #selector(retryHotkeys), keyEquivalent: "")
     private let lastHotkeyMenuItem = NSMenuItem(title: "Last hotkey: none", action: nil, keyEquivalent: "")
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
@@ -276,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
         self.hotkeyController = hotkeyController
+        floatingBarController.updateOutputMode(configuration.outputMode)
         refreshOrbProgression()
         refreshPermissionMenuState()
 
@@ -401,8 +403,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(startStopMenuItem)
 
         polishMenuItem.target = self
-        polishMenuItem.state = configuration.enablePolish ? .on : .off
         menu.addItem(polishMenuItem)
+
+        promptModeMenuItem.target = self
+        promptModeMenuItem.image = NSImage(
+            systemSymbolName: "text.badge.sparkles",
+            accessibilityDescription: "Prompt Mode"
+        )
+        menu.addItem(promptModeMenuItem)
+        updateOutputModeMenuItems()
 
         menu.addItem(.separator())
 
@@ -567,8 +576,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         dictationController.isPolishEnabled.toggle()
-        configuration.enablePolish = dictationController.isPolishEnabled
-        polishMenuItem.state = configuration.enablePolish ? .on : .off
+        configuration.outputMode = dictationController.isPolishEnabled
+            ? .polish
+            : .transcript
+        updateOutputModeMenuItems()
+    }
+
+    @objc nonisolated private func togglePromptMode() {
+        AppKitMainThreadBridge.run {
+            togglePromptModeOnMainActor()
+        }
+    }
+
+    private func togglePromptModeOnMainActor() {
+        guard let dictationController else {
+            return
+        }
+
+        dictationController.isPromptModeEnabled.toggle()
+        configuration.outputMode = dictationController.isPromptModeEnabled
+            ? .prompt
+            : .transcript
+        updateOutputModeMenuItems()
+    }
+
+    private func updateOutputModeMenuItems() {
+        polishMenuItem.state = configuration.outputMode == .polish
+            ? .on
+            : .off
+        promptModeMenuItem.state = configuration.outputMode == .prompt
+            ? .on
+            : .off
+        floatingBarController?.updateOutputMode(configuration.outputMode)
     }
 
     @objc nonisolated private func showMainWindow() {
@@ -636,7 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try loadRuntimeConfiguration()
             dictationController?.updateConfiguration(configuration, dictionary: dictionary)
             restartHotkeys()
-            polishMenuItem.state = configuration.enablePolish ? .on : .off
+            updateOutputModeMenuItems()
             showMainWindow()
         } catch {
             floatingBarController?.update(status: .error(error.localizedDescription))
@@ -870,7 +909,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refreshOrbProgression()
                 self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
                 self.restartHotkeys()
-                self.polishMenuItem.state = updatedConfiguration.enablePolish ? .on : .off
+                self.updateOutputModeMenuItems()
                 return .success(())
             } catch {
                 return .failure(error)
@@ -921,7 +960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try self.loadRuntimeConfiguration()
                 self.dictationController?.updateConfiguration(self.configuration, dictionary: self.dictionary)
                 self.restartHotkeys()
-                self.polishMenuItem.state = self.configuration.enablePolish ? .on : .off
+                self.updateOutputModeMenuItems()
                 self.presentMainWindow(selectHistory: false)
             } catch {
                 self.floatingBarController?.update(status: .error(error.localizedDescription))

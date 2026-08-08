@@ -176,7 +176,7 @@ struct LocalFlowSettingsView: View {
                 ) {
                     HubSettingRow(
                         label: "API key",
-                        help: "Used directly for transcription and optional polish."
+                        help: "Used directly for transcription, Polish, and Prompt Mode."
                     ) {
                         SecureField("sk-…", text: $model.apiKey)
                             .textFieldStyle(.roundedBorder)
@@ -202,15 +202,29 @@ struct LocalFlowSettingsView: View {
                     }
 
                     HubSettingRow(
-                        label: "Polish dictation",
-                        help: "Lightly clean grammar and speech artifacts after transcription."
+                        label: "Writing mode",
+                        help: "Transcript keeps your words, Polish cleans them lightly, and Prompt rewrites them as a clear instruction for an AI."
                     ) {
-                        Toggle("", isOn: $model.configuration.enablePolish)
-                            .toggleStyle(.switch)
-                            .labelsHidden()
+                        Picker(
+                            "Writing mode",
+                            selection: $model.configuration.outputMode
+                        ) {
+                            Text("Transcript").tag(
+                                DictationOutputMode.transcript
+                            )
+                            Text("Polish").tag(
+                                DictationOutputMode.polish
+                            )
+                            Text("Prompt").tag(
+                                DictationOutputMode.prompt
+                            )
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 300)
                     }
 
-                    if model.configuration.enablePolish {
+                    if model.configuration.outputMode == .polish {
                         HubSettingRow(
                             label: "Polish model",
                             help: "Text model used for the optional cleanup pass."
@@ -218,6 +232,20 @@ struct LocalFlowSettingsView: View {
                             TextField("gpt-4o-mini", text: $model.configuration.polishModel)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 260)
+                        }
+                    }
+
+                    if model.configuration.outputMode == .prompt {
+                        HubSettingRow(
+                            label: "Prompt model",
+                            help: "Fast text model used to clarify the transcript. GPT-5.4 Nano runs with reasoning disabled for minimum latency."
+                        ) {
+                            TextField(
+                                "gpt-5.4-nano",
+                                text: $model.configuration.promptModel
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 260)
                         }
                     }
                 }

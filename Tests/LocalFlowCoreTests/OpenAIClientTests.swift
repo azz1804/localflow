@@ -8,6 +8,76 @@ final class OpenAIClientTests: XCTestCase {
         super.tearDown()
     }
 
+    func testPromptModeUsesResponsesAPILowLatencyPayload() async throws {
+        let script = ResponseScript([
+            .http(
+                status: 200,
+                body: #"{"output":[{"type":"message","content":[{"type":"output_text","text":"Objectif : corriger le bug.\n\nContraintes : préserver les tests."}]}]}"#,
+                headers: [:]
+            )
+        ])
+        URLProtocolStub.install(script)
+        let client = makeClient(delays: DelayRecorder())
+
+        let result = try await client.rewriteAsPrompt(
+            text: "corrige le bug et garde les tests",
+            model: "gpt-5.4-nano",
+            systemPrompt: "Réécris en prompt.",
+            userPrompt: "<dictation>corrige le bug</dictation>"
+        )
+
+        XCTAssertEqual(
+            result,
+            "Objectif : corriger le bug.\n\nContraintes : préserver les tests."
+        )
+        let request = try XCTUnwrap(script.lastRequest)
+        XCTAssertEqual(request.url?.path, "/v1/responses")
+        XCTAssertEqual(request.timeoutInterval, 30)
+        let body = try requestBody(request)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        XCTAssertEqual(payload["model"] as? String, "gpt-5.4-nano")
+        XCTAssertEqual(payload["store"] as? Bool, false)
+        XCTAssertEqual(payload["max_output_tokens"] as? Int, 4_096)
+        XCTAssertEqual(
+            (payload["reasoning"] as? [String: Any])?["effort"]
+                as? String,
+            "none"
+        )
+        XCTAssertEqual(
+            (payload["text"] as? [String: Any])?["verbosity"]
+                as? String,
+            "low"
+        )
+    }
+
+    func testPromptModeRejectsEmptyModelOutput() async throws {
+        let script = ResponseScript([
+            .http(
+                status: 200,
+                body: #"{"output":[{"type":"reasoning"}]}"#,
+                headers: [:]
+            )
+        ])
+        URLProtocolStub.install(script)
+        let client = makeClient(delays: DelayRecorder())
+
+        do {
+            _ = try await client.rewriteAsPrompt(
+                text: "une demande",
+                model: "gpt-5.4-nano",
+                systemPrompt: "Réécris.",
+                userPrompt: "une demande"
+            )
+            XCTFail("An empty Prompt Mode response must be rejected")
+        } catch OpenAIClientError.emptyPromptResponse {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testRetriesTransientNetworkFailureThenSucceeds() async throws {
         let script = ResponseScript([
             .failure(URLError(.timedOut)),
@@ -284,6 +354,29 @@ final class OpenAIClientTests: XCTestCase {
                 await delays.append(delay)
             }
         )
+    }
+
+    private func requestBody(_ request: URLRequest) throws -> Data {
+        if let httpBody = request.httpBody {
+            return httpBody
+        }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = Array(repeating: UInt8(0), count: 4_096)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count >= 0 else {
+                throw stream.streamError ?? URLError(.cannotDecodeContentData)
+            }
+            guard count > 0 else {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+        return data
     }
 
     private func makeSession() -> URLSession {

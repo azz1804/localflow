@@ -14,6 +14,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - Local temporary audio recording, deleted after transcription.
 - OpenAI transcription with French defaults and mixed English vocabulary support.
 - Optional OpenAI polish pass, disabled by default.
+- Prompt Mode turns spoken notes into concise, structured AI prompts with a low-latency `gpt-5.4-nano` pass.
 - App-aware prompt hints for Terminal/Codex, Cursor, WhatsApp and Telegram.
 - Local editable dictionary and replacement rules.
 - Automatic paste into native and custom editors, including Electron-based apps, through a protected temporary clipboard.
@@ -125,7 +126,8 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - When AirPods or another Bluetooth headset is selected as the microphone, LocalFlow uses the built-in Mac microphone by default to preserve high-quality Bluetooth playback. Disable `Protect AirPods audio` in Settings if you explicitly want the headset microphone.
 - Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
-- Use the menu bar icon for manual start/stop, polish mode, opening LocalFlow and quitting.
+- Use the menu bar icon for manual start/stop, Polish, Prompt Mode, opening LocalFlow and quitting.
+- Enable `Prompt Mode` to remove speech artifacts and clarify the goal, context, constraints, and expected output without answering or inventing details. Prompt Mode and Polish are mutually exclusive.
 - Choose `Open History` from the menu bar icon for instant access to recent transcripts.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Diagnostics > Reload Config and Dictionary`.
@@ -137,6 +139,7 @@ Menu bar items:
 
 - `Start Recording` / `Stop Recording`: manual recording control.
 - `Polish Dictation`: toggles the optional post-processing pass for the current session.
+- `Prompt Mode`: rewrites the transcript as an AI-ready prompt for the current session.
 - `Open LocalFlow`: opens the graphical interface.
 - `Open History`: opens the graphical interface directly on local transcripts.
 - `Quit LocalFlow`: quits the background app.
@@ -149,7 +152,7 @@ Open it from `LF > Open LocalFlow`.
 - `History`: search and browse transcripts grouped by day, inspect raw/final text, copy an item or clear local history.
 - `Words & Stats`: track total words, dictation speed, voice time, estimated time saved, streaks and top applications.
 - `Dictionary`: edit vocabulary terms and replacement rules. Terms are one per line. Replacements use `spoken phrase = final text`.
-- `Settings`: edit the OpenAI key, models, language, hotkeys, polish, clipboard restore and history retention.
+- `Settings`: choose Transcript, Polish, or Prompt output; edit the OpenAI key, models, language, hotkeys, clipboard restore and history retention.
 - `Diagnostics`: inspect hotkey status, permissions, file paths and logs, or restart the hotkey engine.
 
 Settings are saved to:
