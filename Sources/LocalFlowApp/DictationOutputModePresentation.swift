@@ -4,9 +4,9 @@ extension DictationOutputMode {
     var displayName: String {
         switch self {
         case .transcript:
-            return "Transcript"
+            return "Raw mode"
         case .polish:
-            return "Polish"
+            return "Lissé"
         case .prompt:
             return "Prompt"
         }
@@ -20,6 +20,17 @@ extension DictationOutputMode {
             return "wand.and.stars"
         case .prompt:
             return "sparkles"
+        }
+    }
+
+    var compactDisplayName: String {
+        switch self {
+        case .transcript:
+            return "Raw"
+        case .polish:
+            return "Lissé"
+        case .prompt:
+            return "Prompt"
         }
     }
 

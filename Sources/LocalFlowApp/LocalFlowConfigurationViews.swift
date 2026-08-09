@@ -176,7 +176,7 @@ struct LocalFlowSettingsView: View {
                 ) {
                     HubSettingRow(
                         label: "API key",
-                        help: "Used directly for transcription, Polish, and Prompt Mode."
+                        help: "Used directly for transcription, Lissé, and Prompt Mode."
                     ) {
                         SecureField("sk-…", text: $model.apiKey)
                             .textFieldStyle(.roundedBorder)
@@ -203,16 +203,16 @@ struct LocalFlowSettingsView: View {
 
                     HubSettingRow(
                         label: "Writing mode",
-                        help: "Transcript keeps your words, Polish cleans them lightly, and Prompt rewrites them as a clear instruction for an AI."
+                        help: "Raw mode keeps your exact transcript, Lissé cleans it lightly, and Prompt turns it into a clear instruction while preserving your voice."
                     ) {
                         Picker(
                             "Writing mode",
                             selection: $model.configuration.outputMode
                         ) {
-                            Text("Transcript").tag(
+                            Text("Raw mode").tag(
                                 DictationOutputMode.transcript
                             )
-                            Text("Polish").tag(
+                            Text("Lissé").tag(
                                 DictationOutputMode.polish
                             )
                             Text("Prompt").tag(
@@ -226,7 +226,7 @@ struct LocalFlowSettingsView: View {
 
                     if model.configuration.outputMode == .polish {
                         HubSettingRow(
-                            label: "Polish model",
+                            label: "Lissé model",
                             help: "Text model used for the optional cleanup pass."
                         ) {
                             TextField("gpt-4o-mini", text: $model.configuration.polishModel)

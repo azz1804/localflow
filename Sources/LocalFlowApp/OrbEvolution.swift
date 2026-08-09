@@ -27,6 +27,10 @@ enum OrbMaterial: String, CaseIterable, Equatable, Hashable, Sendable {
     case aurora
     case lava
     case galaxy
+    case ice
+    case plasma
+    case prism
+    case eclipse
 
     var name: String {
         rawValue.capitalized
@@ -46,6 +50,14 @@ enum OrbMaterial: String, CaseIterable, Equatable, Hashable, Sendable {
             return "flame.fill"
         case .galaxy:
             return "sparkles"
+        case .ice:
+            return "snowflake"
+        case .plasma:
+            return "bolt.fill"
+        case .prism:
+            return "triangle.fill"
+        case .eclipse:
+            return "circle.lefthalf.filled"
         }
     }
 
@@ -63,6 +75,14 @@ enum OrbMaterial: String, CaseIterable, Equatable, Hashable, Sendable {
             return "Dark crust and incandescent veins"
         case .galaxy:
             return "Spiral matter and stellar dust"
+        case .ice:
+            return "Frozen light and slow crystalline currents"
+        case .plasma:
+            return "Electric filaments and charged color"
+        case .prism:
+            return "Refracted light and spectral ribbons"
+        case .eclipse:
+            return "Dark gravity and a molten solar rim"
         }
     }
 }
@@ -205,6 +225,70 @@ enum OrbEvolution {
             breathingAmplitude: 0.008,
             fieldScale: 1.2,
             sparkleCount: 12
+        ),
+        OrbTheme(
+            id: "glacier-heart",
+            name: "Glacier Heart",
+            unlockWords: 180_000,
+            material: .ice,
+            baseDark: OrbRGBA(red: 0.008, green: 0.04, blue: 0.09),
+            primary: OrbRGBA(red: 0.08, green: 0.46, blue: 0.72),
+            secondary: OrbRGBA(red: 0.32, green: 0.84, blue: 0.96),
+            accent: OrbRGBA(red: 0.54, green: 0.62, blue: 1),
+            highlight: OrbRGBA(red: 0.86, green: 0.98, blue: 1),
+            rim: OrbRGBA(red: 0.42, green: 0.78, blue: 0.96),
+            motionSpeed: 0.76,
+            breathingAmplitude: 0.007,
+            fieldScale: 1.26,
+            sparkleCount: 5
+        ),
+        OrbTheme(
+            id: "plasma-orchid",
+            name: "Plasma Orchid",
+            unlockWords: 300_000,
+            material: .plasma,
+            baseDark: OrbRGBA(red: 0.065, green: 0.004, blue: 0.11),
+            primary: OrbRGBA(red: 0.5, green: 0.05, blue: 0.92),
+            secondary: OrbRGBA(red: 0.12, green: 0.66, blue: 1),
+            accent: OrbRGBA(red: 1, green: 0.12, blue: 0.62),
+            highlight: OrbRGBA(red: 0.96, green: 0.66, blue: 1),
+            rim: OrbRGBA(red: 0.74, green: 0.24, blue: 1),
+            motionSpeed: 1.31,
+            breathingAmplitude: 0.016,
+            fieldScale: 0.88,
+            sparkleCount: 7
+        ),
+        OrbTheme(
+            id: "prismatic-dream",
+            name: "Prismatic Dream",
+            unlockWords: 500_000,
+            material: .prism,
+            baseDark: OrbRGBA(red: 0.025, green: 0.025, blue: 0.08),
+            primary: OrbRGBA(red: 0.24, green: 0.72, blue: 0.9),
+            secondary: OrbRGBA(red: 0.88, green: 0.38, blue: 0.94),
+            accent: OrbRGBA(red: 1, green: 0.7, blue: 0.26),
+            highlight: OrbRGBA(red: 0.94, green: 0.98, blue: 1),
+            rim: OrbRGBA(red: 0.7, green: 0.5, blue: 1),
+            motionSpeed: 0.97,
+            breathingAmplitude: 0.012,
+            fieldScale: 1.04,
+            sparkleCount: 9
+        ),
+        OrbTheme(
+            id: "event-horizon",
+            name: "Event Horizon",
+            unlockWords: 1_000_000,
+            material: .eclipse,
+            baseDark: OrbRGBA(red: 0.002, green: 0.002, blue: 0.008),
+            primary: OrbRGBA(red: 0.08, green: 0.035, blue: 0.18),
+            secondary: OrbRGBA(red: 0.62, green: 0.2, blue: 0.9),
+            accent: OrbRGBA(red: 1, green: 0.38, blue: 0.08),
+            highlight: OrbRGBA(red: 1, green: 0.82, blue: 0.36),
+            rim: OrbRGBA(red: 0.96, green: 0.46, blue: 0.12),
+            motionSpeed: 0.69,
+            breathingAmplitude: 0.006,
+            fieldScale: 1.34,
+            sparkleCount: 14
         )
     ]
 

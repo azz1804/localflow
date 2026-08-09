@@ -241,7 +241,7 @@ public final class OpenAIClient: @unchecked Sendable {
             instructions: systemPrompt,
             input: userPrompt,
             reasoning: .init(effort: "none"),
-            text: .init(verbosity: "low"),
+            text: .init(verbosity: "medium"),
             maxOutputTokens: 4_096,
             store: false
         )

@@ -32,7 +32,7 @@ final class OrbEvolutionTests: XCTestCase {
 
     func testOrbProgressClampsNegativeWordsAndCompletesMasterTier() {
         let empty = OrbEvolution.progression(forWords: -20)
-        let master = OrbEvolution.progression(forWords: 250_000)
+        let master = OrbEvolution.progression(forWords: 1_250_000)
 
         XCTAssertEqual(empty.totalWords, 0)
         XCTAssertEqual(empty.progressToNext, 0)
@@ -81,5 +81,17 @@ final class OrbEvolutionTests: XCTestCase {
             progression.progressLabel,
             "Administrator override · Lava"
         )
+    }
+
+    func testNewPremiumOrbCollectionIsAvailable() {
+        let newIDs = Set([
+            "glacier-heart",
+            "plasma-orchid",
+            "prismatic-dream",
+            "event-horizon"
+        ])
+
+        XCTAssertTrue(newIDs.isSubset(of: Set(OrbEvolution.themes.map(\.id))))
+        XCTAssertEqual(OrbEvolution.themes.count, 10)
     }
 }

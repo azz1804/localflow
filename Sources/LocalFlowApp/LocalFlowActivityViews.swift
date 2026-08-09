@@ -1175,6 +1175,18 @@ struct ReferenceLiquidOrbSurface: View {
         case .galaxy:
             oilOpacity = 0.4
             oilRadius = 0.42
+        case .ice:
+            oilOpacity = 0.14
+            oilRadius = 0.62
+        case .plasma:
+            oilOpacity = 0.12
+            oilRadius = 0.5
+        case .prism:
+            oilOpacity = 0.11
+            oilRadius = 0.58
+        case .eclipse:
+            oilOpacity = 0.54
+            oilRadius = 0.38
         }
 
         let fields: [(CGPoint, Color, CGFloat)] = [
@@ -1275,6 +1287,45 @@ struct ReferenceLiquidOrbSurface: View {
                 orbRect: orbRect
             )
         case .galaxy:
+            drawGalaxyMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .ice:
+            drawWaterMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+            drawAuroraMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .plasma:
+            drawLavaMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+            drawAuroraMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .prism:
+            drawWindMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+            drawAuroraMaterial(
+                context: &context,
+                blob: blob,
+                orbRect: orbRect
+            )
+        case .eclipse:
             drawGalaxyMaterial(
                 context: &context,
                 blob: blob,
@@ -1982,7 +2033,7 @@ struct LocalFlowHistoryView: View {
                                     text: "Prompt Mode"
                                 )
                             } else if record.resolvedOutputMode == .polish {
-                                HubInfoPill(symbol: "sparkles", text: "Polished")
+                                HubInfoPill(symbol: "sparkles", text: "Lissé")
                             }
                         }
 

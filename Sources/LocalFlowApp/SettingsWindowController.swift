@@ -177,7 +177,7 @@ final class LocalFlowHubModel: ObservableObject {
         configuration.outputMode = mode
         switch outputModeChangeHandler?(mode) ?? .success(()) {
         case .success:
-            showStatus("\(mode.displayName) mode active")
+            showStatus("\(mode.displayName) active")
         case let .failure(error):
             configuration.outputMode = previousMode
             showStatus(error.localizedDescription, isError: true)

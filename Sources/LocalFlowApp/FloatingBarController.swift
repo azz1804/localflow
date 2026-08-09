@@ -164,9 +164,82 @@ enum FloatingBarEnvelopeMotion {
     }
 }
 
+enum FloatingBarPresentationMode: Equatable {
+    case horizontal
+    case vertical
+    case compact
+
+    var panelSize: NSSize {
+        switch self {
+        case .horizontal:
+            return NSSize(width: 390, height: 64)
+        case .vertical:
+            return NSSize(width: 72, height: 316)
+        case .compact:
+            return NSSize(width: 58, height: 58)
+        }
+    }
+}
+
+enum FloatingBarPlacement {
+    static let edgeActivationDistance: CGFloat = 104
+    static let edgeMargin: CGFloat = 12
+
+    static func expandedMode(
+        forCenter center: NSPoint,
+        in visibleFrame: NSRect
+    ) -> FloatingBarPresentationMode {
+        let isNearLeft = center.x
+            <= visibleFrame.minX + edgeActivationDistance
+        let isNearRight = center.x
+            >= visibleFrame.maxX - edgeActivationDistance
+        return isNearLeft || isNearRight ? .vertical : .horizontal
+    }
+
+    static func clampedCenter(
+        _ center: NSPoint,
+        panelSize: NSSize,
+        in visibleFrame: NSRect
+    ) -> NSPoint {
+        NSPoint(
+            x: min(
+                visibleFrame.maxX - panelSize.width / 2 - edgeMargin,
+                max(
+                    visibleFrame.minX + panelSize.width / 2 + edgeMargin,
+                    center.x
+                )
+            ),
+            y: min(
+                visibleFrame.maxY - panelSize.height / 2 - edgeMargin,
+                max(
+                    visibleFrame.minY + panelSize.height / 2 + edgeMargin,
+                    center.y
+                )
+            )
+        )
+    }
+}
+
 enum FloatingBarModeControlLayout {
-    static func timerRect(in cardRect: NSRect) -> NSRect {
-        NSRect(
+    static let modes: [DictationOutputMode] = [
+        .transcript,
+        .polish,
+        .prompt
+    ]
+
+    static func timerRect(
+        in cardRect: NSRect,
+        presentation: FloatingBarPresentationMode = .horizontal
+    ) -> NSRect {
+        if presentation == .vertical {
+            return NSRect(
+                x: cardRect.midX - 24.5,
+                y: cardRect.maxY - 29,
+                width: 49,
+                height: 21
+            )
+        }
+        return NSRect(
             x: cardRect.maxX - 49 - 9,
             y: cardRect.midY - 10.5,
             width: 49,
@@ -174,26 +247,132 @@ enum FloatingBarModeControlLayout {
         )
     }
 
-    static func modeRect(in cardRect: NSRect) -> NSRect {
-        let timerRect = timerRect(in: cardRect)
+    static func modeGroupRect(
+        in cardRect: NSRect,
+        presentation: FloatingBarPresentationMode = .horizontal
+    ) -> NSRect {
+        let timerRect = timerRect(
+            in: cardRect,
+            presentation: presentation
+        )
+        if presentation == .vertical {
+            return NSRect(
+                x: cardRect.midX - 25,
+                y: timerRect.minY - 76,
+                width: 50,
+                height: 69
+            )
+        }
         return NSRect(
-            x: timerRect.minX - 27,
+            x: timerRect.minX - 123,
             y: timerRect.minY,
-            width: 22,
+            width: 115,
             height: timerRect.height
         )
+    }
+
+    static func modeRects(
+        in cardRect: NSRect,
+        presentation: FloatingBarPresentationMode = .horizontal
+    ) -> [(DictationOutputMode, NSRect)] {
+        let group = modeGroupRect(
+            in: cardRect,
+            presentation: presentation
+        )
+        if presentation == .vertical {
+            let height: CGFloat = 21
+            return modes.enumerated().map { index, mode in
+                (
+                    mode,
+                    NSRect(
+                        x: group.minX,
+                        y: group.minY + CGFloat(index) * 24,
+                        width: group.width,
+                        height: height
+                    )
+                )
+            }
+        }
+
+        let width = group.width / CGFloat(modes.count)
+        return modes.enumerated().map { index, mode in
+            (
+                mode,
+                NSRect(
+                    x: group.minX + CGFloat(index) * width,
+                    y: group.minY,
+                    width: width,
+                    height: group.height
+                )
+            )
+        }
+    }
+
+    static func spectrumRect(
+        in cardRect: NSRect,
+        presentation: FloatingBarPresentationMode
+    ) -> NSRect {
+        switch presentation {
+        case .horizontal:
+            let group = modeGroupRect(
+                in: cardRect,
+                presentation: presentation
+            )
+            return NSRect(
+                x: cardRect.minX + 53,
+                y: cardRect.midY - 13,
+                width: max(80, group.minX - cardRect.minX - 61),
+                height: 26
+            )
+        case .vertical:
+            let group = modeGroupRect(
+                in: cardRect,
+                presentation: presentation
+            )
+            return NSRect(
+                x: cardRect.midX - 13,
+                y: cardRect.minY + 48,
+                width: 26,
+                height: max(80, group.minY - cardRect.minY - 58)
+            )
+        case .compact:
+            return .zero
+        }
+    }
+
+    static func orbCenter(
+        in cardRect: NSRect,
+        presentation: FloatingBarPresentationMode
+    ) -> NSPoint {
+        switch presentation {
+        case .horizontal:
+            return NSPoint(x: cardRect.minX + 22, y: cardRect.midY)
+        case .vertical:
+            return NSPoint(x: cardRect.midX, y: cardRect.minY + 23)
+        case .compact:
+            return NSPoint(x: cardRect.midX, y: cardRect.midY)
+        }
     }
 }
 
 @MainActor
 final class FloatingBarController {
-    static let panelSize = NSSize(width: 304, height: 64)
+    static let panelSize = FloatingBarPresentationMode.horizontal.panelSize
 
     var onOutputModeChange: ((DictationOutputMode) -> Void)?
 
     private let panel: NSPanel
     private let contentView: FloatingBarView
     private var hideTask: Task<Void, Never>?
+    private var presentationMode: FloatingBarPresentationMode = .horizontal
+    private var hasPositionedPanel = false
+    private let defaults = UserDefaults.standard
+
+    private enum DefaultsKey {
+        static let centerX = "floatingBarCenterX"
+        static let centerY = "floatingBarCenterY"
+        static let isCompact = "floatingBarIsCompact"
+    }
 
     init() {
         contentView = FloatingBarView(
@@ -212,11 +391,17 @@ final class FloatingBarController {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.acceptsMouseMovedEvents = true
         panel.animationBehavior = .utilityWindow
         contentView.onOutputModeChange = { [weak self] mode in
             self?.onOutputModeChange?(mode)
+        }
+        contentView.onBackgroundClick = { [weak self] in
+            self?.toggleCompactPresentation()
+        }
+        contentView.onDragEnded = { [weak self] in
+            self?.finishPanelDrag()
         }
     }
 
@@ -236,7 +421,7 @@ final class FloatingBarController {
             return
         }
 
-        positionPanel()
+        positionPanelIfNeeded()
         showPanel()
 
         switch status {
@@ -267,15 +452,144 @@ final class FloatingBarController {
         contentView.updateOutputMode(mode)
     }
 
-    private func positionPanel() {
+    private func positionPanelIfNeeded() {
+        guard !hasPositionedPanel else {
+            return
+        }
         guard let screen = NSScreen.main else {
             return
         }
 
         let visible = screen.visibleFrame
-        let x = visible.midX - panel.frame.width / 2
-        let y = visible.minY + 50
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        let storedCenter = storedPanelCenter()
+        let center = storedCenter ?? NSPoint(
+            x: visible.midX,
+            y: visible.minY + 50 + Self.panelSize.height / 2
+        )
+        let expandedMode = FloatingBarPlacement.expandedMode(
+            forCenter: center,
+            in: visible
+        )
+        presentationMode = defaults.bool(
+            forKey: DefaultsKey.isCompact
+        ) ? .compact : expandedMode
+        setPresentationMode(
+            presentationMode,
+            centeredAt: center,
+            in: visible,
+            animated: false
+        )
+        hasPositionedPanel = true
+    }
+
+    private func toggleCompactPresentation() {
+        guard let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+            return
+        }
+        let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let nextMode: FloatingBarPresentationMode
+        if presentationMode == .compact {
+            nextMode = FloatingBarPlacement.expandedMode(
+                forCenter: center,
+                in: visible
+            )
+        } else {
+            nextMode = .compact
+        }
+        setPresentationMode(
+            nextMode,
+            centeredAt: center,
+            in: visible,
+            animated: true
+        )
+        defaults.set(nextMode == .compact, forKey: DefaultsKey.isCompact)
+        persistPanelCenter()
+    }
+
+    private func finishPanelDrag() {
+        guard let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+            return
+        }
+        var center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        if presentationMode != .compact {
+            let nextMode = FloatingBarPlacement.expandedMode(
+                forCenter: center,
+                in: visible
+            )
+            if nextMode == .vertical {
+                let isLeft = center.x < visible.midX
+                center.x = isLeft
+                    ? visible.minX
+                        + nextMode.panelSize.width / 2
+                        + FloatingBarPlacement.edgeMargin
+                    : visible.maxX
+                        - nextMode.panelSize.width / 2
+                        - FloatingBarPlacement.edgeMargin
+            }
+            setPresentationMode(
+                nextMode,
+                centeredAt: center,
+                in: visible,
+                animated: true
+            )
+        } else {
+            let clamped = FloatingBarPlacement.clampedCenter(
+                center,
+                panelSize: presentationMode.panelSize,
+                in: visible
+            )
+            panel.setFrameOrigin(
+                NSPoint(
+                    x: clamped.x - panel.frame.width / 2,
+                    y: clamped.y - panel.frame.height / 2
+                )
+            )
+        }
+        persistPanelCenter()
+    }
+
+    private func setPresentationMode(
+        _ mode: FloatingBarPresentationMode,
+        centeredAt requestedCenter: NSPoint,
+        in visible: NSRect,
+        animated: Bool
+    ) {
+        presentationMode = mode
+        let size = mode.panelSize
+        let center = FloatingBarPlacement.clampedCenter(
+            requestedCenter,
+            panelSize: size,
+            in: visible
+        )
+        let frame = NSRect(
+            x: center.x - size.width / 2,
+            y: center.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        contentView.updatePresentationMode(mode)
+        panel.setFrame(
+            frame,
+            display: true,
+            animate: animated
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+    }
+
+    private func storedPanelCenter() -> NSPoint? {
+        guard defaults.object(forKey: DefaultsKey.centerX) != nil,
+              defaults.object(forKey: DefaultsKey.centerY) != nil else {
+            return nil
+        }
+        return NSPoint(
+            x: defaults.double(forKey: DefaultsKey.centerX),
+            y: defaults.double(forKey: DefaultsKey.centerY)
+        )
+    }
+
+    private func persistPanelCenter() {
+        defaults.set(panel.frame.midX, forKey: DefaultsKey.centerX)
+        defaults.set(panel.frame.midY, forKey: DefaultsKey.centerY)
     }
 
     private func showPanel() {
@@ -332,7 +646,10 @@ final class FloatingBarView: NSView {
 
     private var status: AppStatus = .idle
     private var outputMode = DictationOutputMode.transcript
+    private var presentationMode = FloatingBarPresentationMode.horizontal
     var onOutputModeChange: ((DictationOutputMode) -> Void)?
+    var onBackgroundClick: (() -> Void)?
+    var onDragEnded: (() -> Void)?
     private var displayedEnvelope = Array(
         repeating: Float(0),
         count: envelopeSegmentCount
@@ -392,18 +709,25 @@ final class FloatingBarView: NSView {
     }
 
     private var cardRect: NSRect {
-        bounds.insetBy(dx: 6, dy: 5)
+        presentationMode == .compact
+            ? bounds.insetBy(dx: 5, dy: 5)
+            : bounds.insetBy(dx: 6, dy: 5)
     }
 
-    private var modeControlRect: NSRect {
-        FloatingBarModeControlLayout.modeRect(in: cardRect)
+    private var modeControlRects: [(DictationOutputMode, NSRect)] {
+        FloatingBarModeControlLayout.modeRects(
+            in: cardRect,
+            presentation: presentationMode
+        )
     }
 
-    private var isModeControlHovered: Bool {
+    private var hoveredOutputMode: DictationOutputMode? {
         guard case .recording = status else {
-            return false
+            return nil
         }
-        return modeControlRect.contains(hoverLocation)
+        return modeControlRects.first {
+            $0.1.contains(hoverLocation)
+        }?.0
     }
 
     private func configureLayer() {
@@ -870,6 +1194,19 @@ final class FloatingBarView: NSView {
         }
     }
 
+    nonisolated override func resetCursorRects() {
+        AppKitMainThreadBridge.run {
+            super.resetCursorRects()
+            addCursorRect(cardRect, cursor: .openHand)
+            guard presentationMode != .compact else {
+                return
+            }
+            for (_, rect) in modeControlRects {
+                addCursorRect(rect, cursor: .pointingHand)
+            }
+        }
+    }
+
     nonisolated override func mouseEntered(with event: NSEvent) {
         let locationInWindow = event.locationInWindow
         AppKitMainThreadBridge.run {
@@ -900,24 +1237,46 @@ final class FloatingBarView: NSView {
 
     nonisolated override func mouseDown(with event: NSEvent) {
         let locationInWindow = event.locationInWindow
+        let callbackEvent = AppKitCallbackValue(value: event)
         AppKitMainThreadBridge.run {
             let location = convert(locationInWindow, from: nil)
-            guard case .recording = status,
-                  modeControlRect.contains(location) else {
+            if case .recording = status,
+               presentationMode != .compact,
+               let selectedMode = modeControlRects.first(where: {
+                   $0.1.contains(location)
+               })?.0 {
+                updateOutputMode(selectedMode)
+                onOutputModeChange?(selectedMode)
                 return
             }
 
-            let nextMode = outputMode.next
-            updateOutputMode(nextMode)
-            onOutputModeChange?(nextMode)
+            guard let window else {
+                onBackgroundClick?()
+                return
+            }
+            let initialOrigin = window.frame.origin
+            window.performDrag(with: callbackEvent.value)
+            let distance = hypot(
+                window.frame.origin.x - initialOrigin.x,
+                window.frame.origin.y - initialOrigin.y
+            )
+            if distance >= 3 {
+                onDragEnded?()
+            } else {
+                onBackgroundClick?()
+            }
         }
     }
 
     private func updateHoverLocation(locationInWindow: NSPoint) {
         hoverLocation = convert(locationInWindow, from: nil)
-        toolTip = isModeControlHovered
-            ? "\(outputMode.displayName) mode — click to switch"
-            : nil
+        if let hoveredOutputMode {
+            toolTip = "Activer \(hoveredOutputMode.displayName)"
+        } else if presentationMode == .compact {
+            toolTip = "Cliquer pour déployer · Glisser pour déplacer"
+        } else {
+            toolTip = "Cliquer pour réduire · Glisser pour déplacer"
+        }
         needsDisplay = true
     }
 
@@ -976,7 +1335,7 @@ final class FloatingBarView: NSView {
             wasRecording = false
             lastSequence = 0
             lastTimerSecond = nil
-            orbContainerLayer.isHidden = true
+            orbContainerLayer.isHidden = presentationMode != .compact
             stopOrbAnimation()
         }
 
@@ -1015,15 +1374,36 @@ final class FloatingBarView: NSView {
         }
         outputMode = mode
         updateOutputModeAccessibility()
-        if isModeControlHovered {
-            toolTip = "\(mode.displayName) mode — click to switch"
+        if hoveredOutputMode != nil {
+            toolTip = "Activer \(mode.displayName)"
         }
+        needsDisplay = true
+    }
+
+    func updatePresentationMode(_ mode: FloatingBarPresentationMode) {
+        guard presentationMode != mode else {
+            return
+        }
+        presentationMode = mode
+        frame.size = mode.panelSize
+        updateTrackingAreas()
+        discardCursorRects()
+        updateAudioLayerGeometry()
+        updateProcessingIndicatorForCurrentStatus()
+        if case .recording = status {
+            spectrumContainerLayer.isHidden = mode == .compact
+            orbContainerLayer.isHidden = false
+        } else if mode == .compact {
+            orbContainerLayer.isHidden = false
+            updateOrbActivity()
+        }
+        updateOutputModeAccessibility()
         needsDisplay = true
     }
 
     private func updateOutputModeAccessibility() {
         setAccessibilityHelp(
-            "Writing mode: \(outputMode.displayName). Click the mode button to switch."
+            "Mode: \(outputMode.displayName). Choose a named mode, click the bar to resize it, or drag it to move it."
         )
     }
 
@@ -1115,6 +1495,7 @@ final class FloatingBarView: NSView {
         let shouldShow: Bool
         if case .processing = status {
             shouldShow = !isSpectrumDismissing
+                && presentationMode != .compact
         } else {
             shouldShow = false
         }
@@ -1258,22 +1639,30 @@ final class FloatingBarView: NSView {
     }
 
     private func drawCard() {
+        let radius = presentationMode == .horizontal
+            ? min(27, cardRect.height / 2)
+            : min(cardRect.width, cardRect.height) / 2
         let path = NSBezierPath(
             roundedRect: cardRect,
-            xRadius: 27,
-            yRadius: 27
+            xRadius: radius,
+            yRadius: radius
         )
 
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
 
         let palette = barPalette
-        NSGradient(
-            colors: [
-                palette.backgroundTop.nsColor(alpha: 0.985),
-                palette.backgroundBottom.nsColor(alpha: 0.99)
-            ]
-        )?.draw(in: cardRect, angle: -8)
+        if presentationMode == .compact {
+            palette.backgroundBottom.nsColor(alpha: 0.86).setFill()
+            path.fill()
+        } else {
+            NSGradient(
+                colors: [
+                    palette.backgroundTop.nsColor(alpha: 0.985),
+                    palette.backgroundBottom.nsColor(alpha: 0.99)
+                ]
+            )?.draw(in: cardRect, angle: -8)
+        }
 
         drawOrbAmbientLight()
 
@@ -1283,11 +1672,18 @@ final class FloatingBarView: NSView {
 
         NSGraphicsContext.restoreGraphicsState()
 
-        let borderColor = isHovered
-            ? palette.spectrumCenter.nsColor(alpha: 0.34)
-            : palette.border.nsColor(alpha: 0.18)
+        let borderColor: NSColor
+        if presentationMode == .compact {
+            borderColor = palette.border.nsColor(alpha: 0.12)
+        } else {
+            borderColor = isHovered
+                ? palette.spectrumCenter.nsColor(alpha: 0.34)
+                : palette.border.nsColor(alpha: 0.18)
+        }
         borderColor.setStroke()
-        path.lineWidth = isHovered ? 0.9 : 0.7
+        path.lineWidth = presentationMode == .compact
+            ? 0.4
+            : (isHovered ? 0.9 : 0.7)
         path.stroke()
     }
 
@@ -1312,8 +1708,14 @@ final class FloatingBarView: NSView {
         }
 
         let center = CGPoint(
-            x: cardRect.minX + 22,
-            y: cardRect.midY
+            x: FloatingBarModeControlLayout.orbCenter(
+                in: cardRect,
+                presentation: presentationMode
+            ).x,
+            y: FloatingBarModeControlLayout.orbCenter(
+                in: cardRect,
+                presentation: presentationMode
+            ).y
         )
         context.drawRadialGradient(
             gradient,
@@ -1353,58 +1755,79 @@ final class FloatingBarView: NSView {
     }
 
     private func drawRecordingState() {
+        guard presentationMode != .compact else {
+            return
+        }
         drawOutputModeControl()
         drawTimer()
     }
 
     private func drawOutputModeControl() {
-        let rect = modeControlRect
-        let path = NSBezierPath(
-            roundedRect: rect,
-            xRadius: rect.height / 2,
-            yRadius: rect.height / 2
+        let groupRect = FloatingBarModeControlLayout.modeGroupRect(
+            in: cardRect,
+            presentation: presentationMode
         )
-        let hovered = isModeControlHovered
+        let groupPath = NSBezierPath(
+            roundedRect: groupRect,
+            xRadius: 11,
+            yRadius: 11
+        )
+        barPalette.backgroundBottom.nsColor(alpha: 0.72).setFill()
+        groupPath.fill()
+        NSColor.white.withAlphaComponent(0.09).setStroke()
+        groupPath.lineWidth = 0.65
+        groupPath.stroke()
 
-        NSGradient(
-            colors: [
-                barPalette.spectrumCenter.nsColor(
-                    alpha: hovered ? 0.32 : 0.16
+        for (mode, rect) in modeControlRects {
+            let selected = mode == outputMode
+            let hovered = mode == hoveredOutputMode
+            if selected || hovered {
+                let segmentPath = NSBezierPath(
+                    roundedRect: rect.insetBy(dx: 1.2, dy: 1.2),
+                    xRadius: 9.5,
+                    yRadius: 9.5
+                )
+                NSGradient(
+                    colors: [
+                        barPalette.spectrumCenter.nsColor(
+                            alpha: selected ? 0.32 : 0.18
+                        ),
+                        barPalette.ambientPrimary.nsColor(
+                            alpha: selected ? 0.2 : 0.1
+                        )
+                    ]
+                )?.draw(in: segmentPath, angle: -62)
+                (selected
+                    ? barPalette.spectrumCenter.nsColor(alpha: 0.54)
+                    : NSColor.white.withAlphaComponent(0.14)
+                ).setStroke()
+                segmentPath.lineWidth = 0.7
+                segmentPath.stroke()
+            }
+
+            let label = mode.compactDisplayName
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(
+                    ofSize: presentationMode == .vertical ? 8.2 : 8.5,
+                    weight: selected ? .semibold : .medium
                 ),
-                barPalette.backgroundBottom.nsColor(alpha: 0.96)
+                .foregroundColor: selected
+                    ? NSColor.white.withAlphaComponent(0.94)
+                    : NSColor.white.withAlphaComponent(
+                        hovered ? 0.78 : 0.48
+                    )
             ]
-        )?.draw(in: path, angle: -70)
-
-        let borderColor = hovered
-            ? barPalette.spectrumCenter.nsColor(alpha: 0.66)
-            : NSColor.white.withAlphaComponent(0.12)
-        borderColor.setStroke()
-        path.lineWidth = hovered ? 0.9 : 0.7
-        path.stroke()
-
-        let color = barPalette.spectrumCenter.nsColor(
-            alpha: hovered ? 1 : 0.76
-        )
-        let configuration = NSImage.SymbolConfiguration(
-            pointSize: 8.5,
-            weight: .semibold
-        ).applying(
-            NSImage.SymbolConfiguration(paletteColors: [color])
-        )
-        guard let image = NSImage(
-            systemSymbolName: outputMode.systemSymbolName,
-            accessibilityDescription: "\(outputMode.displayName) mode"
-        )?.withSymbolConfiguration(configuration) else {
-            return
-        }
-        image.draw(
-            in: NSRect(
-                x: rect.midX - image.size.width / 2,
-                y: rect.midY - image.size.height / 2,
-                width: image.size.width,
-                height: image.size.height
+            let size = label.size(withAttributes: attributes)
+            label.draw(
+                in: NSRect(
+                    x: rect.midX - size.width / 2,
+                    y: rect.midY - size.height / 2,
+                    width: ceil(size.width),
+                    height: ceil(size.height)
+                ),
+                withAttributes: attributes
             )
-        )
+        }
     }
 
     private func drawTimer() {
@@ -1418,7 +1841,10 @@ final class FloatingBarView: NSView {
             totalSeconds / 60,
             totalSeconds % 60
         )
-        let capsuleRect = FloatingBarModeControlLayout.timerRect(in: cardRect)
+        let capsuleRect = FloatingBarModeControlLayout.timerRect(
+            in: cardRect,
+            presentation: presentationMode
+        )
         drawTimerCapsule(in: capsuleRect, mode: mode)
 
         let timerAttributes: [NSAttributedString.Key: Any] = [
@@ -1510,22 +1936,37 @@ final class FloatingBarView: NSView {
         spectrumContainerLayer.frame = bounds
         processingContainerLayer.frame = bounds
         for (index, dotLayer) in processingDotLayers.enumerated() {
-            dotLayer.position = CGPoint(
-                x: cardRect.midX + (CGFloat(index) - 1) * 10,
-                y: cardRect.midY
-            )
+            if presentationMode == .vertical {
+                dotLayer.position = CGPoint(
+                    x: cardRect.midX,
+                    y: cardRect.midY + (CGFloat(index) - 1) * 10
+                )
+            } else {
+                dotLayer.position = CGPoint(
+                    x: cardRect.midX + (CGFloat(index) - 1) * 10,
+                    y: cardRect.midY
+                )
+            }
         }
 
-        let orbSize: CGFloat = 20
+        let orbSize: CGFloat
+        switch presentationMode {
+        case .horizontal:
+            orbSize = 20
+        case .vertical:
+            orbSize = 25
+        case .compact:
+            orbSize = 46
+        }
         orbContainerLayer.bounds = NSRect(
             x: 0,
             y: 0,
             width: orbSize,
             height: orbSize
         )
-        orbContainerLayer.position = CGPoint(
-            x: cardRect.minX + 22,
-            y: cardRect.midY
+        orbContainerLayer.position = FloatingBarModeControlLayout.orbCenter(
+            in: cardRect,
+            presentation: presentationMode
         )
         orbClipLayer.frame = orbContainerLayer.bounds
         orbClipLayer.cornerRadius = 0
@@ -1554,18 +1995,23 @@ final class FloatingBarView: NSView {
     }
 
     private func updateSpectrumLayers() {
-        let rect = NSRect(
-            x: cardRect.minX + 53,
-            y: cardRect.midY - 13,
-            width: 126,
-            height: 26
+        guard presentationMode != .compact else {
+            spectrumContainerLayer.isHidden = true
+            return
+        }
+        let rect = FloatingBarModeControlLayout.spectrumRect(
+            in: cardRect,
+            presentation: presentationMode
         )
         guard !displayedEnvelope.isEmpty,
               spectrumBarLayers.count == Self.spectrumBarCount else {
             return
         }
 
-        let spacing = rect.width
+        let availableLength = presentationMode == .vertical
+            ? rect.height
+            : rect.width
+        let spacing = availableLength
             / CGFloat((Self.displayedSegmentCount - 1) * 2 + 2)
         let barWidth: CGFloat = 2.2
         let centerY = rect.midY
@@ -1596,16 +2042,29 @@ final class FloatingBarView: NSView {
                 value: value
             )
             let barLayer = spectrumBarLayers[layerIndex]
-            barLayer.bounds = CGRect(
-                x: 0,
-                y: 0,
-                width: barWidth,
-                height: presentation.amplitude * 2
-            )
-            barLayer.position = CGPoint(
-                x: rect.midX + CGFloat(offsetIndex) * spacing,
-                y: centerY
-            )
+            if presentationMode == .vertical {
+                barLayer.bounds = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: presentation.amplitude * 2,
+                    height: barWidth
+                )
+                barLayer.position = CGPoint(
+                    x: rect.midX,
+                    y: rect.midY + CGFloat(offsetIndex) * spacing
+                )
+            } else {
+                barLayer.bounds = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: barWidth,
+                    height: presentation.amplitude * 2
+                )
+                barLayer.position = CGPoint(
+                    x: rect.midX + CGFloat(offsetIndex) * spacing,
+                    y: centerY
+                )
+            }
             barLayer.opacity = Float(presentation.alpha)
             barLayer.cornerRadius = min(
                 barWidth / 2,
@@ -1622,8 +2081,14 @@ final class FloatingBarView: NSView {
         orbContainerLayer.isHidden = false
 
         let center = CGPoint(
-            x: cardRect.minX + 22,
-            y: cardRect.midY
+            x: FloatingBarModeControlLayout.orbCenter(
+                in: cardRect,
+                presentation: presentationMode
+            ).x,
+            y: FloatingBarModeControlLayout.orbCenter(
+                in: cardRect,
+                presentation: presentationMode
+            ).y
         )
         let hoverDelta = CGPoint(
             x: hoverLocation.x - center.x,
@@ -1696,7 +2161,9 @@ final class FloatingBarView: NSView {
         )
         orbHighlightLayer.startPoint = motion.highlight
 
-        let visibleSparkleCount = orbTheme.material == .galaxy
+        let visibleSparkleCount = [.galaxy, .eclipse].contains(
+            orbTheme.material
+        )
             ? min(
                 orbTheme.sparkleCount,
                 orbGlitterLayers.count
@@ -1736,11 +2203,19 @@ final class FloatingBarView: NSView {
         )
         orbMaskLayer.path = blobPath
         orbRimLayer.path = blobPath
-        orbRimLayer.opacity = Float(
-            0.58 + motion.turbulence * 0.12
-        )
-        orbRimLayer.lineWidth = 0.38 + motion.energy * 0.08
-        orbRimLayer.shadowRadius = 0.7 + motion.energy * 0.5
+        if presentationMode == .compact {
+            orbRimLayer.opacity = 0.24
+            orbRimLayer.lineWidth = 0.22
+            orbRimLayer.shadowOpacity = 0.06
+            orbRimLayer.shadowRadius = 0.25
+        } else {
+            orbRimLayer.opacity = Float(
+                0.58 + motion.turbulence * 0.12
+            )
+            orbRimLayer.lineWidth = 0.38 + motion.energy * 0.08
+            orbRimLayer.shadowOpacity = 0.26
+            orbRimLayer.shadowRadius = 0.7 + motion.energy * 0.5
+        }
 
         orbCausticLayer.path = LiquidOrbGeometry.strandPath(
             in: orbRect,
@@ -1778,12 +2253,12 @@ final class FloatingBarView: NSView {
         orbCausticLayer.isHidden = true
 
         switch orbTheme.material {
-        case .water, .wind, .earth, .aurora, .lava:
+        case .water, .wind, .earth, .aurora, .lava, .ice, .plasma, .prism:
             // At 20 pt, explicit geometry reads as a decal on the glass.
             // The animated radial fields already carry the material behind
             // the clean front lens, so keep the shell visually untouched.
             break
-        case .galaxy:
+        case .galaxy, .eclipse:
             applyGalaxyMaterial(motion, in: rect)
         }
     }
@@ -1862,7 +2337,9 @@ final class FloatingBarView: NSView {
         let motion = LiquidOrbMotion.sample(
             time: 0,
             pointer: nil,
-            sparkleCount: orbTheme.material == .galaxy ? 12 : 0
+            sparkleCount: [.galaxy, .eclipse].contains(orbTheme.material)
+                ? 12
+                : 0
         )
         applyOrbLiquidMotion(motion)
         CATransaction.commit()
@@ -1886,7 +2363,8 @@ final class FloatingBarView: NSView {
     }
 
     private func drawSymbolState(name: String, color: NSColor) {
-        guard !isSpectrumDismissing else {
+        guard !isSpectrumDismissing,
+              presentationMode != .compact else {
             return
         }
         let configuration = NSImage.SymbolConfiguration(

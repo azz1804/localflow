@@ -104,7 +104,7 @@ final class LocalFlowHubModelTests: XCTestCase {
 
         XCTAssertEqual(model.configuration.outputMode, .prompt)
         XCTAssertEqual(selectedMode, .prompt)
-        XCTAssertEqual(model.statusMessage, "Prompt mode active")
+        XCTAssertEqual(model.statusMessage, "Prompt active")
     }
 
     @MainActor

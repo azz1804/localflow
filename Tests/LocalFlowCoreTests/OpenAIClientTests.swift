@@ -48,7 +48,7 @@ final class OpenAIClientTests: XCTestCase {
         XCTAssertEqual(
             (payload["text"] as? [String: Any])?["verbosity"]
                 as? String,
-            "low"
+            "medium"
         )
     }
 

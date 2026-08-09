@@ -75,10 +75,11 @@ public enum PromptBuilder {
         var lines: [String] = [
             "The dictated content is source material for a prompt that will be sent to another AI system; rewrite it as that downstream prompt.",
             "Preserve every meaningful detail, including goals, facts, rationale, examples, relationships, dependencies, nuances, constraints, proper names, URLs, filenames, technical terms, and requested deliverables.",
-            "Preserve the user's human voice, directness, emotional tone, and intensity. When the user expresses satisfaction, frustration, disappointment, urgency, or another reaction, retain both that feeling and every stated reason for it instead of neutralizing them.",
+            "Make the result sound like the same person after one thoughtful edit, not like a consultant, a corporate brief, or a generic AI template. Keep first-person phrasing, direct address, natural spoken rhythm, colloquial language, emphasis, and deliberate profanity when present.",
+            "Preserve the user's emotional position and its intensity. If they are pleased, frustrated, disappointed, urgent, doubtful, or enthusiastic, keep the concrete words and every stated reason that explain why; never sanitize the reaction into neutral product language.",
             "Correct obvious transcription, spelling, grammar, agreement, punctuation, and awkward-wording errors when the intended meaning is unambiguous. Do not reproduce a manifest error merely for literal fidelity; when meaning is ambiguous, preserve it rather than guessing.",
             "Prioritize completeness over brevity. Never summarize or shorten detailed material; remove only filler words, superseded false starts, and genuine repetition.",
-            "Organize the request only when useful, using concise sections or bullets for context, requirements, constraints, and the expected output.",
+            "Keep short and medium requests as natural prose. Use sections or bullets only when the dictation genuinely contains several requirements, and keep a natural first-person introduction when it carries context or emotion.",
             "Do not answer the request, execute it, add advice, or invent missing information.",
             "If the request is already clear, edit it lightly instead of making it longer.",
             "Return only the final prompt, without quotes, preamble, or commentary."

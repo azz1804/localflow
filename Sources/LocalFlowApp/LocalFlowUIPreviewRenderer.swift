@@ -118,6 +118,24 @@ enum LocalFlowUIPreviewRenderer {
                 "localflow-flowbar-processing.png"
             )
         )
+        try renderFloatingBar(
+            hovered: false,
+            outputMode: .prompt,
+            orbThemeOverride: "plasma-orchid",
+            presentation: .vertical,
+            to: outputDirectory.appendingPathComponent(
+                "localflow-flowbar-vertical.png"
+            )
+        )
+        try renderFloatingBar(
+            hovered: true,
+            outputMode: .prompt,
+            orbThemeOverride: "prismatic-dream",
+            presentation: .compact,
+            to: outputDirectory.appendingPathComponent(
+                "localflow-flowbar-compact.png"
+            )
+        )
         for theme in OrbEvolution.themes {
             try renderFloatingBar(
                 hovered: false,
@@ -164,14 +182,16 @@ enum LocalFlowUIPreviewRenderer {
         processing: Bool = false,
         outputMode: DictationOutputMode = .transcript,
         orbThemeOverride: String,
+        presentation: FloatingBarPresentationMode = .horizontal,
         to outputURL: URL
     ) throws {
         let view = FloatingBarView(
             frame: NSRect(
                 origin: .zero,
-                size: FloatingBarController.panelSize
+                size: presentation.panelSize
             )
         )
+        view.updatePresentationMode(presentation)
         let window = NSWindow(
             contentRect: view.bounds,
             styleMask: [.borderless],

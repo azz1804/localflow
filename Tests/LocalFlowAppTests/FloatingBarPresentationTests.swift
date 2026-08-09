@@ -11,14 +11,24 @@ final class FloatingBarPresentationTests: XCTestCase {
     }
 
     func testModeControlStaysBetweenSpectrumAndTimer() {
-        let cardRect = NSRect(x: 6, y: 5, width: 292, height: 54)
-        let modeRect = FloatingBarModeControlLayout.modeRect(in: cardRect)
+        let cardRect = NSRect(
+            x: 6,
+            y: 5,
+            width: FloatingBarPresentationMode.horizontal.panelSize.width - 12,
+            height: 54
+        )
+        let modeRects = FloatingBarModeControlLayout.modeRects(in: cardRect)
+        let modeRect = FloatingBarModeControlLayout.modeGroupRect(
+            in: cardRect
+        )
         let timerRect = FloatingBarModeControlLayout.timerRect(in: cardRect)
 
+        XCTAssertEqual(modeRects.map(\.0), [.transcript, .polish, .prompt])
         XCTAssertGreaterThanOrEqual(modeRect.minX, cardRect.minX)
         XCTAssertLessThan(modeRect.maxX, timerRect.minX)
         XCTAssertLessThanOrEqual(timerRect.maxX, cardRect.maxX)
         XCTAssertEqual(modeRect.height, timerRect.height)
+        XCTAssertTrue(modeRects.allSatisfy { modeRect.contains($0.1) })
     }
 
     func testModeControlClickChangesTheActiveMode() {
@@ -39,9 +49,9 @@ final class FloatingBarPresentationTests: XCTestCase {
             view.onOutputModeChange = { selectedMode = $0 }
 
             let cardRect = view.bounds.insetBy(dx: 6, dy: 5)
-            let modeRect = FloatingBarModeControlLayout.modeRect(
+            let modeRect = FloatingBarModeControlLayout.modeRects(
                 in: cardRect
-            )
+            ).first { $0.0 == .polish }!.1
             let clickPoint = NSPoint(
                 x: modeRect.midX,
                 y: modeRect.midY
@@ -64,6 +74,94 @@ final class FloatingBarPresentationTests: XCTestCase {
 
             XCTAssertEqual(selectedMode, .polish)
         }
+    }
+
+    func testPromptModeCanBeSelectedDirectlyWithoutCycling() {
+        AppKitMainThreadBridge.run {
+            let view = FloatingBarView(
+                frame: NSRect(
+                    origin: .zero,
+                    size: FloatingBarController.panelSize
+                )
+            )
+            view.update(
+                status: .recording(2, .toggle),
+                visualization: .silent,
+                reduceMotion: true
+            )
+            var selectedMode: DictationOutputMode?
+            view.onOutputModeChange = { selectedMode = $0 }
+            let cardRect = view.bounds.insetBy(dx: 6, dy: 5)
+            let promptRect = FloatingBarModeControlLayout.modeRects(
+                in: cardRect
+            ).first { $0.0 == .prompt }!.1
+            let event = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: NSPoint(x: promptRect.midX, y: promptRect.midY),
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: 1
+            )
+
+            if let event {
+                view.mouseDown(with: event)
+            }
+
+            XCTAssertEqual(selectedMode, .prompt)
+        }
+    }
+
+    func testBarBecomesVerticalNearEitherScreenEdge() {
+        let visible = NSRect(x: 0, y: 0, width: 1_440, height: 900)
+
+        XCTAssertEqual(
+            FloatingBarPlacement.expandedMode(
+                forCenter: NSPoint(x: 70, y: 400),
+                in: visible
+            ),
+            .vertical
+        )
+        XCTAssertEqual(
+            FloatingBarPlacement.expandedMode(
+                forCenter: NSPoint(x: 1_370, y: 400),
+                in: visible
+            ),
+            .vertical
+        )
+        XCTAssertEqual(
+            FloatingBarPlacement.expandedMode(
+                forCenter: NSPoint(x: 720, y: 100),
+                in: visible
+            ),
+            .horizontal
+        )
+    }
+
+    func testVerticalModeUsesAStackedThreeWaySelector() {
+        let cardRect = NSRect(x: 6, y: 5, width: 60, height: 306)
+        let modeRects = FloatingBarModeControlLayout.modeRects(
+            in: cardRect,
+            presentation: .vertical
+        )
+
+        XCTAssertEqual(modeRects.count, 3)
+        XCTAssertLessThan(modeRects[0].1.maxY, modeRects[1].1.minY)
+        XCTAssertLessThan(modeRects[1].1.maxY, modeRects[2].1.minY)
+        XCTAssertEqual(modeRects.map(\.0), [.transcript, .polish, .prompt])
+    }
+
+    func testCompactPresentationIsASquareOrbTarget() {
+        let size = FloatingBarPresentationMode.compact.panelSize
+
+        XCTAssertEqual(size.width, size.height)
+        XCTAssertLessThan(
+            size.width,
+            FloatingBarPresentationMode.horizontal.panelSize.height
+        )
     }
 
     func testEveryOrbProducesADistinctBarAtmosphere() {
@@ -205,6 +303,7 @@ final class FloatingBarPresentationTests: XCTestCase {
 
             _ = view.perform(#selector(NSView.layout))
             _ = view.perform(#selector(NSView.updateTrackingAreas))
+            _ = view.perform(#selector(NSView.resetCursorRects))
             XCTAssertEqual(view.trackingAreas.count, 1)
 
             if let mouseEvent {

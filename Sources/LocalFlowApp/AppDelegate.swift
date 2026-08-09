@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationPreparationIsInFlight = false
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
-    private let polishMenuItem = NSMenuItem(title: "Polish Dictation", action: #selector(togglePolish), keyEquivalent: "")
+    private let polishMenuItem = NSMenuItem(title: "Lissé", action: #selector(togglePolish), keyEquivalent: "")
     private let promptModeMenuItem = NSMenuItem(title: "Prompt Mode", action: #selector(togglePromptMode), keyEquivalent: "")
     private let hotkeyStatusMenuItem = NSMenuItem(title: "Hotkeys: Starting", action: #selector(retryHotkeys), keyEquivalent: "")
     private let lastHotkeyMenuItem = NSMenuItem(title: "Last hotkey: none", action: nil, keyEquivalent: "")
