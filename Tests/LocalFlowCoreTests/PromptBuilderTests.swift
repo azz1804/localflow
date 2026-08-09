@@ -12,6 +12,8 @@ final class PromptBuilderTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Transcribe French speech accurately"))
         XCTAssertTrue(prompt.contains("Important vocabulary: Codex, Cursor"))
         XCTAssertTrue(prompt.contains("terminal or coding-agent prompts"))
+        XCTAssertTrue(prompt.contains("especially backend, frontend, API"))
+        XCTAssertTrue(prompt.contains("never replace them with phonetically similar French words"))
         XCTAssertTrue(prompt.contains("Language hint: fr"))
     }
 
@@ -52,5 +54,25 @@ final class PromptBuilderTests: XCTestCase {
         XCTAssertTrue(systemPrompt.contains("when meaning is ambiguous, preserve it rather than guessing"))
         XCTAssertTrue(userPrompt.contains("<dictation>"))
         XCTAssertTrue(userPrompt.contains("corrige App.swift"))
+    }
+
+    func testMailModeStructuresWithoutInventingAndPreservesTechnicalTerms() {
+        let systemPrompt = PromptBuilder.emailModeSystemPrompt(
+            targetApplication: TargetApplicationInfo(
+                localizedName: "Mail",
+                bundleIdentifier: "com.apple.mail"
+            )
+        )
+        let userPrompt = PromptBuilder.emailModeUserPrompt(
+            text: "salut Thomas le backend plante encore merci"
+        )
+
+        XCTAssertTrue(systemPrompt.contains("ready-to-paste email"))
+        XCTAssertTrue(systemPrompt.contains("Keep English technical words such as backend exactly"))
+        XCTAssertTrue(systemPrompt.contains("Objet :"))
+        XCTAssertTrue(systemPrompt.contains("do not invent one"))
+        XCTAssertTrue(systemPrompt.contains("natural voice"))
+        XCTAssertTrue(userPrompt.contains("<dictation>"))
+        XCTAssertTrue(userPrompt.contains("le backend plante encore"))
     }
 }

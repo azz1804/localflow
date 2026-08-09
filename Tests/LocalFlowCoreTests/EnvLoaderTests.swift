@@ -29,6 +29,7 @@ final class EnvLoaderTests: XCTestCase {
             "PASTE_RESTORE_DELAY_MS": "1200",
             "ORB_THEME": "solar-nova",
             "ENABLE_PROMPT_MODE": "true",
+            "ENABLE_MAIL_MODE": "false",
             "PROMPT_MODEL": "gpt-prompt-test",
             "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH": "false"
         ])
@@ -63,9 +64,10 @@ final class EnvLoaderTests: XCTestCase {
             openAIAPIKey: "sk-test",
             transcriptionModel: "gpt-4o-transcribe",
             transcriptionLanguage: "fr",
-            enablePolish: true,
+            enablePolish: false,
             polishModel: "gpt-4o-mini",
             enablePromptMode: false,
+            enableMailMode: true,
             promptModel: "gpt-5.6-luna",
             holdHotkey: "fn",
             fallbackHoldHotkey: "option+space",
@@ -93,18 +95,27 @@ final class EnvLoaderTests: XCTestCase {
         )
     }
 
-    func testPromptModeDefaultsToOffAndIsExclusiveWithPolish() {
+    func testPromptAndMailModesAreExclusiveAndLegacyPolishStaysOff() {
         XCTAssertFalse(AppConfiguration().enablePromptMode)
+        XCTAssertFalse(AppConfiguration().enableMailMode)
         XCTAssertEqual(AppConfiguration().promptModel, "gpt-5.6-luna")
 
         var configuration = AppConfiguration(enablePolish: true)
-        XCTAssertEqual(configuration.outputMode, .polish)
-        configuration.outputMode = .prompt
+        XCTAssertEqual(configuration.outputMode, .transcript)
         XCTAssertFalse(configuration.enablePolish)
+        configuration.outputMode = .email
+        XCTAssertTrue(configuration.enableMailMode)
+        XCTAssertFalse(configuration.enablePromptMode)
+        configuration.outputMode = .prompt
         XCTAssertTrue(configuration.enablePromptMode)
+        XCTAssertFalse(configuration.enableMailMode)
         configuration.outputMode = .transcript
         XCTAssertFalse(configuration.enablePolish)
         XCTAssertFalse(configuration.enablePromptMode)
+        XCTAssertFalse(configuration.enableMailMode)
+
+        configuration.outputMode = .polish
+        XCTAssertEqual(configuration.outputMode, .transcript)
     }
 
     func testConfigurationStoreRestrictsAPIKeyFilePermissions() throws {

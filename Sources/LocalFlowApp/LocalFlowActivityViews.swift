@@ -343,7 +343,7 @@ private struct HubOutputModeSwitcher: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            ForEach(DictationOutputMode.allCases, id: \.self) { mode in
+            ForEach(DictationOutputMode.selectableModes, id: \.self) { mode in
                 Button {
                     onSelect(mode)
                 } label: {
@@ -2032,8 +2032,13 @@ struct LocalFlowHistoryView: View {
                                     symbol: "text.badge.sparkles",
                                     text: "Prompt Mode"
                                 )
+                            } else if record.resolvedOutputMode == .email {
+                                HubInfoPill(
+                                    symbol: "envelope.fill",
+                                    text: "Mail"
+                                )
                             } else if record.resolvedOutputMode == .polish {
-                                HubInfoPill(symbol: "sparkles", text: "Lissé")
+                                HubInfoPill(symbol: "sparkles", text: "Lissé (ancien)")
                             }
                         }
 

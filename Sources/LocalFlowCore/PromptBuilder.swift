@@ -31,6 +31,7 @@ public enum PromptBuilder {
         var lines: [String] = [
             "Transcribe French speech accurately.",
             "Preserve natural English words, product names, developer tools, and code-related terms used inside French sentences.",
+            "Transcribe common technical words exactly as spoken, especially backend, frontend, API, database, framework, repository, server, client, deploy, build, and bug; never replace them with phonetically similar French words.",
             "Add punctuation only when it is strongly implied by the speech.",
             "Do not translate, summarize, or add content."
         ]
@@ -93,6 +94,36 @@ public enum PromptBuilder {
     }
 
     public static func promptModeUserPrompt(text: String) -> String {
+        """
+        <dictation>
+        \(text)
+        </dictation>
+        """
+    }
+
+    public static func emailModeSystemPrompt(
+        targetApplication: TargetApplicationInfo?
+    ) -> String {
+        var lines: [String] = [
+            "Turn the dictated source into a ready-to-paste email in the user's language.",
+            "Preserve every fact, name, request, reason, technical term, and deliberate emotional nuance. Keep English technical words such as backend exactly; never replace an unfamiliar term with a guessed phrase.",
+            "Correct only clear transcription, grammar, and punctuation errors. If wording is uncertain, preserve it rather than inventing or guessing.",
+            "Keep the user's natural voice and intended level of formality instead of making every email corporate or overly polite.",
+            "Return a concise subject line beginning with 'Objet :', then an appropriate greeting, short readable paragraphs, and a natural closing. If no recipient or sender name is provided, do not invent one.",
+            "Do not answer the email, add facts, promises, dates, recipients, or requests that were not dictated.",
+            "Return only the finished email."
+        ]
+
+        if let targetApplication {
+            lines.append(
+                "The email will be pasted into \(targetApplication.displayName); use that only as light context."
+            )
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    public static func emailModeUserPrompt(text: String) -> String {
         """
         <dictation>
         \(text)

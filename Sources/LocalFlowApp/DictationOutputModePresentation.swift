@@ -1,14 +1,22 @@
 import LocalFlowCore
 
 extension DictationOutputMode {
+    static let selectableModes: [DictationOutputMode] = [
+        .transcript,
+        .prompt,
+        .email
+    ]
+
     var displayName: String {
         switch self {
         case .transcript:
             return "Raw mode"
         case .polish:
-            return "Lissé"
+            return "Lissé (ancien)"
         case .prompt:
             return "Prompt"
+        case .email:
+            return "Mail"
         }
     }
 
@@ -20,6 +28,8 @@ extension DictationOutputMode {
             return "wand.and.stars"
         case .prompt:
             return "sparkles"
+        case .email:
+            return "envelope.fill"
         }
     }
 
@@ -31,16 +41,18 @@ extension DictationOutputMode {
             return "Lissé"
         case .prompt:
             return "Prompt"
+        case .email:
+            return "Mail"
         }
     }
 
     var next: DictationOutputMode {
         switch self {
         case .transcript:
-            return .polish
-        case .polish:
             return .prompt
         case .prompt:
+            return .email
+        case .email, .polish:
             return .transcript
         }
     }

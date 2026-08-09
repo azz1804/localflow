@@ -2,8 +2,11 @@ import Foundation
 
 public enum DictationOutputMode: String, Codable, CaseIterable, Sendable {
     case transcript
+    // Kept for decoding existing history and pending jobs. New dictations no
+    // longer expose or select this legacy mode.
     case polish
     case prompt
+    case email
 }
 
 public struct AppConfiguration: Equatable, Sendable {
@@ -13,6 +16,7 @@ public struct AppConfiguration: Equatable, Sendable {
     public var enablePolish: Bool
     public var polishModel: String
     public var enablePromptMode: Bool
+    public var enableMailMode: Bool
     public var promptModel: String
     public var holdHotkey: String
     public var fallbackHoldHotkey: String
@@ -28,11 +32,12 @@ public struct AppConfiguration: Equatable, Sendable {
             if enablePromptMode {
                 return .prompt
             }
-            return enablePolish ? .polish : .transcript
+            return enableMailMode ? .email : .transcript
         }
         set {
-            enablePolish = newValue == .polish
+            enablePolish = false
             enablePromptMode = newValue == .prompt
+            enableMailMode = newValue == .email
         }
     }
 
@@ -52,6 +57,7 @@ public struct AppConfiguration: Equatable, Sendable {
         enablePolish: Bool = false,
         polishModel: String = "gpt-4o-mini",
         enablePromptMode: Bool = false,
+        enableMailMode: Bool = false,
         promptModel: String = "gpt-5.6-luna",
         holdHotkey: String = "fn",
         fallbackHoldHotkey: String = "option+space",
@@ -65,9 +71,12 @@ public struct AppConfiguration: Equatable, Sendable {
         self.openAIAPIKey = openAIAPIKey
         self.transcriptionModel = transcriptionModel
         self.transcriptionLanguage = transcriptionLanguage
-        self.enablePolish = enablePromptMode ? false : enablePolish
+        // The legacy value is accepted so older callers still compile, but
+        // Lissé is intentionally disabled for all new sessions.
+        self.enablePolish = false
         self.polishModel = polishModel
-        self.enablePromptMode = enablePromptMode
+        self.enablePromptMode = enablePromptMode && !enableMailMode
+        self.enableMailMode = enableMailMode
         self.promptModel = promptModel
         self.holdHotkey = holdHotkey
         self.fallbackHoldHotkey = fallbackHoldHotkey
@@ -88,6 +97,10 @@ public struct AppConfiguration: Equatable, Sendable {
             polishModel: env["POLISH_MODEL"]?.nonEmpty ?? "gpt-4o-mini",
             enablePromptMode: Self.boolValue(
                 env["ENABLE_PROMPT_MODE"],
+                default: false
+            ),
+            enableMailMode: Self.boolValue(
+                env["ENABLE_MAIL_MODE"],
                 default: false
             ),
             promptModel: env["PROMPT_MODEL"]?.nonEmpty ?? "gpt-5.6-luna",
@@ -113,6 +126,7 @@ public struct AppConfiguration: Equatable, Sendable {
             ("ENABLE_POLISH", enablePolish ? "true" : "false"),
             ("POLISH_MODEL", polishModel),
             ("ENABLE_PROMPT_MODE", enablePromptMode ? "true" : "false"),
+            ("ENABLE_MAIL_MODE", enableMailMode ? "true" : "false"),
             ("PROMPT_MODEL", promptModel),
             ("HOLD_HOTKEY", holdHotkey),
             ("FALLBACK_HOLD_HOTKEY", fallbackHoldHotkey),

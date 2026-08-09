@@ -99,10 +99,10 @@ enum LocalFlowUIPreviewRenderer {
         )
         try renderFloatingBar(
             hovered: false,
-            outputMode: .polish,
+            outputMode: .email,
             orbThemeOverride: "automatic",
             to: outputDirectory.appendingPathComponent(
-                "localflow-flowbar-polish-mode.png"
+                "localflow-flowbar-mail-mode.png"
             )
         )
         try renderFloatingBar(

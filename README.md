@@ -13,8 +13,8 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - `Escape` cancels the active recording without transcribing or pasting it.
 - Local temporary audio recording, deleted after transcription.
 - OpenAI transcription with French defaults and mixed English vocabulary support.
-- Optional OpenAI polish pass, disabled by default.
 - Prompt Mode turns spoken notes into concise, structured AI prompts with a low-latency `gpt-5.6-luna` pass.
+- Mail Mode turns a dictation into a complete ready-to-paste email while preserving the user's voice and technical vocabulary.
 - App-aware prompt hints for Terminal/Codex, Cursor, WhatsApp and Telegram.
 - Local editable dictionary and replacement rules.
 - Automatic paste into native and custom editors, including Electron-based apps, through a protected temporary clipboard.
@@ -126,10 +126,11 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - When AirPods or another Bluetooth headset is selected as the microphone, LocalFlow uses the built-in Mac microphone by default to preserve high-quality Bluetooth playback. Disable `Protect AirPods audio` in Settings if you explicitly want the headset microphone.
 - Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
-- Use the menu bar icon for manual start/stop, Lissé, Prompt Mode, opening LocalFlow and quitting.
-- Switch directly between Raw mode, Lissé, and Prompt from the Home dashboard or from the three-way control in the recording bar. The choice is saved automatically.
+- Use the menu bar icon for manual start/stop, Prompt Mode, Mail Mode, opening LocalFlow and quitting.
+- Switch directly between Raw mode, Prompt, and Mail from the Home dashboard or from the three-way control in the recording bar. The choice is saved automatically.
 - Click the recording bar to collapse it into an orb, click the orb to expand it, or drag either form anywhere on screen. The expanded bar automatically becomes vertical when placed near the left or right edge.
-- Enable `Prompt Mode` to remove speech artifacts and clarify the goal, context, constraints, and expected output without answering or inventing details. Detailed dictations retain their full context, first-person voice, emotional intensity, and stated rationale. Prompt Mode and Lissé are mutually exclusive.
+- Enable `Prompt Mode` to remove speech artifacts and clarify the goal, context, constraints, and expected output without answering or inventing details. Detailed dictations retain their full context, first-person voice, emotional intensity, and stated rationale.
+- Enable `Mail Mode` to add a subject, greeting, readable paragraphs and closing without inventing a recipient or missing context.
 - Choose `Open History` from the menu bar icon for instant access to recent transcripts.
 - Edit settings from `LF > Open LocalFlow > Settings`, or edit `~/Library/Application Support/LocalFlow/.env`, then use `Diagnostics > Reload Config and Dictionary` or restart the app.
 - Edit `~/Library/Application Support/LocalFlow/dictionary.json`, then use `Diagnostics > Reload Config and Dictionary`.
@@ -140,8 +141,8 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 Menu bar items:
 
 - `Start Recording` / `Stop Recording`: manual recording control.
-- `Lissé`: toggles the optional post-processing pass for the current session.
 - `Prompt Mode`: rewrites the transcript as an AI-ready prompt for the current session.
+- `Mail Mode`: formats the transcript as a ready-to-paste email for the current session.
 - `Open LocalFlow`: opens the graphical interface.
 - `Open History`: opens the graphical interface directly on local transcripts.
 - `Quit LocalFlow`: quits the background app.
@@ -154,7 +155,7 @@ Open it from `LF > Open LocalFlow`.
 - `History`: search and browse transcripts grouped by day, inspect raw/final text, copy an item or clear local history.
 - `Words & Stats`: track total words, dictation speed, voice time, estimated time saved, streaks and top applications.
 - `Dictionary`: edit vocabulary terms and replacement rules. Terms are one per line. Replacements use `spoken phrase = final text`.
-- `Settings`: choose Raw mode, Lissé, or Prompt output; edit the OpenAI key, models, language, hotkeys, clipboard restore and history retention.
+- `Settings`: choose Raw, Prompt, or Mail output; edit the OpenAI key, models, language, hotkeys, clipboard restore and history retention.
 - `Diagnostics`: inspect hotkey status, permissions, file paths and logs, or restart the hotkey engine.
 
 Settings are saved to:

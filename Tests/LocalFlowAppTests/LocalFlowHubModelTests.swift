@@ -110,14 +110,14 @@ final class LocalFlowHubModelTests: XCTestCase {
     @MainActor
     func testSelectingOutputModeRollsBackWhenPersistenceFails() {
         let model = LocalFlowHubModel()
-        model.configuration.outputMode = .polish
+        model.configuration.outputMode = .email
         model.outputModeChangeHandler = { _ in
             .failure(OutputModeTestError.persistenceFailed)
         }
 
         model.selectOutputMode(.prompt)
 
-        XCTAssertEqual(model.configuration.outputMode, .polish)
+        XCTAssertEqual(model.configuration.outputMode, .email)
         XCTAssertTrue(model.statusIsError)
     }
 

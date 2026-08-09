@@ -34,6 +34,35 @@ final class PendingDictationStoreTests: XCTestCase {
         XCTAssertEqual(restored.makeHistoryRecord()?.resolvedOutputMode, .prompt)
     }
 
+    func testMailModeMetadataSurvivesPendingAndHistoryRoundTrip() throws {
+        let job = PendingDictationJob(
+            durationSeconds: 1.5,
+            targetApplication: nil,
+            parameters: PendingDictationParameters(
+                transcriptionModel: "transcribe",
+                transcriptionLanguage: "fr",
+                enablePolish: false,
+                polishModel: "polish",
+                outputMode: .email,
+                promptModel: "gpt-5.6-luna",
+                dictionary: .empty
+            ),
+            stage: .ready,
+            transcribedText: "salut le backend plante",
+            finalText: "Objet : Incident backend\n\nBonjour,\n\nLe backend plante.",
+            polished: true,
+            outputMode: .email
+        )
+
+        let restored = try JSONDecoder().decode(
+            PendingDictationJob.self,
+            from: JSONEncoder().encode(job)
+        )
+
+        XCTAssertEqual(restored.parameters.resolvedOutputMode, .email)
+        XCTAssertEqual(restored.makeHistoryRecord()?.resolvedOutputMode, .email)
+    }
+
     func testLegacyPendingParametersResolveToPolishWithoutNewFields() throws {
         let legacyJSON = #"{"transcriptionModel":"transcribe","transcriptionLanguage":"fr","enablePolish":true,"polishModel":"polish","dictionary":{"terms":[],"replacements":{}}}"#
 

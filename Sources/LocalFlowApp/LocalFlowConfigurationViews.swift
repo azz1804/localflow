@@ -176,7 +176,7 @@ struct LocalFlowSettingsView: View {
                 ) {
                     HubSettingRow(
                         label: "API key",
-                        help: "Used directly for transcription, Lissé, and Prompt Mode."
+                        help: "Used directly for transcription, Prompt, and Mail modes."
                     ) {
                         SecureField("sk-…", text: $model.apiKey)
                             .textFieldStyle(.roundedBorder)
@@ -203,7 +203,7 @@ struct LocalFlowSettingsView: View {
 
                     HubSettingRow(
                         label: "Writing mode",
-                        help: "Raw mode keeps your exact transcript, Lissé cleans it lightly, and Prompt turns it into a clear instruction while preserving your voice."
+                        help: "Raw keeps the transcript untouched, Prompt turns it into a clear AI instruction, and Mail formats it as a ready-to-send email."
                     ) {
                         Picker(
                             "Writing mode",
@@ -212,11 +212,11 @@ struct LocalFlowSettingsView: View {
                             Text("Raw mode").tag(
                                 DictationOutputMode.transcript
                             )
-                            Text("Lissé").tag(
-                                DictationOutputMode.polish
-                            )
                             Text("Prompt").tag(
                                 DictationOutputMode.prompt
+                            )
+                            Text("Mail").tag(
+                                DictationOutputMode.email
                             )
                         }
                         .pickerStyle(.segmented)
@@ -224,21 +224,11 @@ struct LocalFlowSettingsView: View {
                         .frame(width: 300)
                     }
 
-                    if model.configuration.outputMode == .polish {
+                    if model.configuration.outputMode == .prompt
+                        || model.configuration.outputMode == .email {
                         HubSettingRow(
-                            label: "Lissé model",
-                            help: "Text model used for the optional cleanup pass."
-                        ) {
-                            TextField("gpt-4o-mini", text: $model.configuration.polishModel)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 260)
-                        }
-                    }
-
-                    if model.configuration.outputMode == .prompt {
-                        HubSettingRow(
-                            label: "Prompt model",
-                            help: "Fast text model used to clarify the transcript. GPT-5.6 Luna runs with reasoning disabled for low latency and stronger prompt quality."
+                            label: "AI writing model",
+                            help: "Used by Prompt and Mail. GPT-5.6 Luna runs with reasoning disabled for low latency and strong writing quality."
                         ) {
                             TextField(
                                 "gpt-5.6-luna",

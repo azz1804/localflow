@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationPreparationIsInFlight = false
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
-    private let polishMenuItem = NSMenuItem(title: "Lissé", action: #selector(togglePolish), keyEquivalent: "")
+    private let mailModeMenuItem = NSMenuItem(title: "Mail Mode", action: #selector(toggleMailMode), keyEquivalent: "")
     private let promptModeMenuItem = NSMenuItem(title: "Prompt Mode", action: #selector(togglePromptMode), keyEquivalent: "")
     private let hotkeyStatusMenuItem = NSMenuItem(title: "Hotkeys: Starting", action: #selector(retryHotkeys), keyEquivalent: "")
     private let lastHotkeyMenuItem = NSMenuItem(title: "Last hotkey: none", action: nil, keyEquivalent: "")
@@ -412,8 +412,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startStopMenuItem.target = self
         menu.addItem(startStopMenuItem)
 
-        polishMenuItem.target = self
-        menu.addItem(polishMenuItem)
+        mailModeMenuItem.target = self
+        mailModeMenuItem.image = NSImage(
+            systemSymbolName: "envelope.fill",
+            accessibilityDescription: "Mail Mode"
+        )
+        menu.addItem(mailModeMenuItem)
 
         promptModeMenuItem.target = self
         promptModeMenuItem.image = NSImage(
@@ -574,14 +578,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc nonisolated private func togglePolish() {
+    @objc nonisolated private func toggleMailMode() {
         AppKitMainThreadBridge.run {
-            togglePolishOnMainActor()
+            toggleMailModeOnMainActor()
         }
     }
 
-    private func togglePolishOnMainActor() {
-        toggleOutputMode(.polish)
+    private func toggleMailModeOnMainActor() {
+        toggleOutputMode(.email)
     }
 
     @objc nonisolated private func togglePromptMode() {
@@ -641,7 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateOutputModeMenuItems() {
-        polishMenuItem.state = configuration.outputMode == .polish
+        mailModeMenuItem.state = configuration.outputMode == .email
             ? .on
             : .off
         promptModeMenuItem.state = configuration.outputMode == .prompt

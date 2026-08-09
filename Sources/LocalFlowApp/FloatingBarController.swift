@@ -221,11 +221,7 @@ enum FloatingBarPlacement {
 }
 
 enum FloatingBarModeControlLayout {
-    static let modes: [DictationOutputMode] = [
-        .transcript,
-        .polish,
-        .prompt
-    ]
+    static let modes = DictationOutputMode.selectableModes
 
     static func timerRect(
         in cardRect: NSRect,

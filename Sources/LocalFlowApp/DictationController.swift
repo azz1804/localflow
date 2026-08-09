@@ -8,20 +8,6 @@ final class DictationController {
     var onHistoryRecordCreated: ((DictationRecord) -> Void)?
     var onInsertionCompleted: ((TextInsertionOutcome) -> Void)?
 
-    var isPolishEnabled: Bool {
-        get { configuration.enablePolish }
-        set {
-            configuration.outputMode = newValue ? .polish : .transcript
-        }
-    }
-
-    var isPromptModeEnabled: Bool {
-        get { configuration.enablePromptMode }
-        set {
-            configuration.outputMode = newValue ? .prompt : .transcript
-        }
-    }
-
     var canCancelRecording: Bool {
         pendingRecordingStartTask != nil
             || isStarting
@@ -855,6 +841,32 @@ final class DictationController {
         var outputMode = DictationOutputMode.transcript
 
         switch parameters.resolvedOutputMode {
+        case .email:
+            outputMode = .email
+            do {
+                let emailStartedAt = ProcessInfo.processInfo.systemUptime
+                finalText = try await client.rewriteAsPrompt(
+                    text: finalText,
+                    model: parameters.promptModel ?? "gpt-5.6-luna",
+                    systemPrompt: PromptBuilder.emailModeSystemPrompt(
+                        targetApplication: job.targetApplication
+                    ),
+                    userPrompt: PromptBuilder.emailModeUserPrompt(
+                        text: finalText
+                    )
+                )
+                try Task.checkCancellation()
+                polished = true
+                LocalFlowLogger.log(
+                    "Mail Mode finished chars=\(finalText.count) durationMs=\(Int(((ProcessInfo.processInfo.systemUptime - emailStartedAt) * 1_000).rounded())) model=\(parameters.promptModel ?? "gpt-5.6-luna")"
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                LocalFlowLogger.log(
+                    "Mail Mode failed; using raw transcript error=\(error.localizedDescription)"
+                )
+            }
         case .prompt:
             outputMode = .prompt
             let decision = PromptModeRouter.decide(for: finalText)

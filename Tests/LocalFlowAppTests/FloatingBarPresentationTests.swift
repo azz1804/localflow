@@ -5,9 +5,10 @@ import XCTest
 
 final class FloatingBarPresentationTests: XCTestCase {
     func testWritingModesCycleWithoutDeadEnd() {
-        XCTAssertEqual(DictationOutputMode.transcript.next, .polish)
-        XCTAssertEqual(DictationOutputMode.polish.next, .prompt)
-        XCTAssertEqual(DictationOutputMode.prompt.next, .transcript)
+        XCTAssertEqual(DictationOutputMode.transcript.next, .prompt)
+        XCTAssertEqual(DictationOutputMode.prompt.next, .email)
+        XCTAssertEqual(DictationOutputMode.email.next, .transcript)
+        XCTAssertEqual(DictationOutputMode.polish.next, .transcript)
     }
 
     func testModeControlStaysBetweenSpectrumAndTimer() {
@@ -23,7 +24,7 @@ final class FloatingBarPresentationTests: XCTestCase {
         )
         let timerRect = FloatingBarModeControlLayout.timerRect(in: cardRect)
 
-        XCTAssertEqual(modeRects.map(\.0), [.transcript, .polish, .prompt])
+        XCTAssertEqual(modeRects.map(\.0), [.transcript, .prompt, .email])
         XCTAssertGreaterThanOrEqual(modeRect.minX, cardRect.minX)
         XCTAssertLessThan(modeRect.maxX, timerRect.minX)
         XCTAssertLessThanOrEqual(timerRect.maxX, cardRect.maxX)
@@ -51,7 +52,7 @@ final class FloatingBarPresentationTests: XCTestCase {
             let cardRect = view.bounds.insetBy(dx: 6, dy: 5)
             let modeRect = FloatingBarModeControlLayout.modeRects(
                 in: cardRect
-            ).first { $0.0 == .polish }!.1
+            ).first { $0.0 == .email }!.1
             let clickPoint = NSPoint(
                 x: modeRect.midX,
                 y: modeRect.midY
@@ -72,7 +73,7 @@ final class FloatingBarPresentationTests: XCTestCase {
                 view.mouseDown(with: event)
             }
 
-            XCTAssertEqual(selectedMode, .polish)
+            XCTAssertEqual(selectedMode, .email)
         }
     }
 
@@ -151,7 +152,7 @@ final class FloatingBarPresentationTests: XCTestCase {
         XCTAssertEqual(modeRects.count, 3)
         XCTAssertLessThan(modeRects[0].1.maxY, modeRects[1].1.minY)
         XCTAssertLessThan(modeRects[1].1.maxY, modeRects[2].1.minY)
-        XCTAssertEqual(modeRects.map(\.0), [.transcript, .polish, .prompt])
+        XCTAssertEqual(modeRects.map(\.0), [.transcript, .prompt, .email])
     }
 
     func testCompactPresentationIsASquareOrbTarget() {
