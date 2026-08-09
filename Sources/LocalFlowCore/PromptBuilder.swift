@@ -101,17 +101,23 @@ public enum PromptBuilder {
     }
 
     public static func emailModeSystemPrompt(
-        targetApplication: TargetApplicationInfo?
+        targetApplication: TargetApplicationInfo?,
+        toneIntent: MailToneIntent = .adaptive
     ) -> String {
         var lines: [String] = [
             "Turn the dictated source into a ready-to-paste email in the user's language.",
+            "First infer the intended relationship and tone from the user's wording. Treat phrases about how to write the email, such as corporate, formal, professional, chill, relaxed, natural, warm, friendly, direct, or concise, as drafting instructions; do not include those instructions as message content.",
+            "Explicit tone cues take priority. Corporate or formal means measured, polished, and appropriately formal. Chill, relaxed, tranquille, or natural means simple, fluid, human wording with a relaxed greeting and sign-off. Warm or friendly means personal and considerate. Direct or concise means brief and straight to the point.",
+            "When no tone is requested, infer it from the recipient, purpose, and wording. Default to clear, natural, and human rather than corporate. Never make an email formal merely because it is an email.",
             "Preserve every fact, name, request, reason, technical term, and deliberate emotional nuance. Keep English technical words such as backend exactly; never replace an unfamiliar term with a guessed phrase.",
             "Correct only clear transcription, grammar, and punctuation errors. If wording is uncertain, preserve it rather than inventing or guessing.",
-            "Keep the user's natural voice and intended level of formality instead of making every email corporate or overly polite.",
-            "Return a concise subject line beginning with 'Objet :', then an appropriate greeting, short readable paragraphs, and a natural closing. If no recipient or sender name is provided, do not invent one.",
+            "Keep the user's natural voice. Match sentence length, vocabulary, greeting, and sign-off to the inferred tone; avoid stock corporate phrases unless a formal style is actually requested.",
+            "Return a concise subject line beginning with 'Objet :', then a tone-appropriate greeting, short readable paragraphs, and a matching closing. If no recipient or sender name is provided, do not invent one.",
             "Do not answer the email, add facts, promises, dates, recipients, or requests that were not dictated.",
             "Return only the finished email."
         ]
+
+        lines.append(mailToneInstruction(for: toneIntent))
 
         if let targetApplication {
             lines.append(
@@ -146,6 +152,23 @@ public enum PromptBuilder {
         }
 
         return "Use the target app only as light context for punctuation and wording."
+    }
+
+    private static func mailToneInstruction(
+        for intent: MailToneIntent
+    ) -> String {
+        switch intent {
+        case .adaptive:
+            return "Local tone detection found no single dominant explicit cue. Interpret the full dictation semantically and choose the least formal tone that fits the relationship and purpose."
+        case .formal:
+            return "Local tone detection found a formal or corporate request. Use professional vocabulary, measured phrasing, respectful address, and a formal closing without becoming stiff or inflated."
+        case .relaxed:
+            return "Local tone detection found a relaxed request. Write like a thoughtful person speaking naturally: simple fluid sentences, a casual but clean greeting and sign-off, no administrative stiffness, and no corporate filler."
+        case .warm:
+            return "Local tone detection found a warm request. Sound personal, considerate, and sincere, while staying clear and avoiding exaggerated sentiment."
+        case .direct:
+            return "Local tone detection found a direct request. Get to the point quickly, keep only useful context, and use a brief natural closing."
+        }
     }
 
     private static func appPolishHint(for targetApplication: TargetApplicationInfo) -> String {

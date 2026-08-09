@@ -60,7 +60,8 @@ final class PromptBuilderTests: XCTestCase {
             targetApplication: TargetApplicationInfo(
                 localizedName: "Mail",
                 bundleIdentifier: "com.apple.mail"
-            )
+            ),
+            toneIntent: .relaxed
         )
         let userPrompt = PromptBuilder.emailModeUserPrompt(
             text: "salut Thomas le backend plante encore merci"
@@ -71,6 +72,10 @@ final class PromptBuilderTests: XCTestCase {
         XCTAssertTrue(systemPrompt.contains("Objet :"))
         XCTAssertTrue(systemPrompt.contains("do not invent one"))
         XCTAssertTrue(systemPrompt.contains("natural voice"))
+        XCTAssertTrue(systemPrompt.contains("Default to clear, natural, and human rather than corporate"))
+        XCTAssertTrue(systemPrompt.contains("relaxed greeting and sign-off"))
+        XCTAssertTrue(systemPrompt.contains("Local tone detection found a relaxed request"))
+        XCTAssertTrue(systemPrompt.contains("no corporate filler"))
         XCTAssertTrue(userPrompt.contains("<dictation>"))
         XCTAssertTrue(userPrompt.contains("le backend plante encore"))
     }

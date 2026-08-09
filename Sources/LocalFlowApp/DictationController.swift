@@ -843,13 +843,18 @@ final class DictationController {
         switch parameters.resolvedOutputMode {
         case .email:
             outputMode = .email
+            let toneDecision = MailToneRouter.decide(for: finalText)
+            LocalFlowLogger.log(
+                "Mail Mode tone=\(toneDecision.intent.rawValue) cues=\(toneDecision.matchedCues.joined(separator: ","))"
+            )
             do {
                 let emailStartedAt = ProcessInfo.processInfo.systemUptime
                 finalText = try await client.rewriteAsPrompt(
                     text: finalText,
                     model: parameters.promptModel ?? "gpt-5.6-luna",
                     systemPrompt: PromptBuilder.emailModeSystemPrompt(
-                        targetApplication: job.targetApplication
+                        targetApplication: job.targetApplication,
+                        toneIntent: toneDecision.intent
                     ),
                     userPrompt: PromptBuilder.emailModeUserPrompt(
                         text: finalText
