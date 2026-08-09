@@ -58,13 +58,27 @@ final class PromptModeRouterTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(decision.wordCount, 28)
     }
 
-    func testConciseNaturalRequestSkipsAI() {
+    func testConciseNaturalRequestUsesAIToBecomeARealPrompt() {
         let decision = PromptModeRouter.decide(
             for: "Explique pourquoi cette animation donne une impression de latence quand je parle"
         )
 
-        XCTAssertEqual(decision.route, .direct)
+        XCTAssertEqual(decision.route, .rewriteWithAI)
         XCTAssertEqual(decision.reason, .conciseAndClear)
+    }
+
+    func testTenWordsStayDirectButElevenWordsUseAI() {
+        let tenWords = PromptModeRouter.decide(
+            for: "Corrige ce bug audio sans modifier le comportement du raccourci"
+        )
+        let elevenWords = PromptModeRouter.decide(
+            for: "Corrige ce bug audio sans modifier le comportement du raccourci clavier"
+        )
+
+        XCTAssertEqual(tenWords.wordCount, 10)
+        XCTAssertEqual(tenWords.route, .direct)
+        XCTAssertEqual(elevenWords.wordCount, 11)
+        XCTAssertEqual(elevenWords.route, .rewriteWithAI)
     }
 
     func testEmptyTextSkipsAI() {

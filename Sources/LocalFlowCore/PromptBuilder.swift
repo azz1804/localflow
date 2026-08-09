@@ -74,16 +74,16 @@ public enum PromptBuilder {
         targetApplication: TargetApplicationInfo?
     ) -> String {
         var lines: [String] = [
-            "The dictated content is source material for a prompt that will be sent to another AI system; rewrite it as that downstream prompt.",
-            "Preserve every meaningful detail, including goals, facts, rationale, examples, relationships, dependencies, nuances, constraints, proper names, URLs, filenames, technical terms, and requested deliverables.",
-            "Make the result sound like the same person after one thoughtful edit, not like a consultant, a corporate brief, or a generic AI template. Keep first-person phrasing, direct address, natural spoken rhythm, colloquial language, emphasis, and deliberate profanity when present.",
-            "Preserve the user's emotional position and its intensity. If they are pleased, frustrated, disappointed, urgent, doubtful, or enthusiastic, keep the concrete words and every stated reason that explain why; never sanitize the reaction into neutral product language.",
-            "Correct obvious transcription, spelling, grammar, agreement, punctuation, and awkward-wording errors when the intended meaning is unambiguous. Do not reproduce a manifest error merely for literal fidelity; when meaning is ambiguous, preserve it rather than guessing.",
-            "Prioritize completeness over brevity. Never summarize or shorten detailed material; remove only filler words, superseded false starts, and genuine repetition.",
-            "Keep short and medium requests as natural prose. Use sections or bullets only when the dictation genuinely contains several requirements, and keep a natural first-person introduction when it carries context or emotion.",
-            "Do not answer the request, execute it, add advice, or invent missing information.",
-            "If the request is already clear, edit it lightly instead of making it longer.",
-            "Return only the final prompt, without quotes, preamble, or commentary."
+            "Rewrite the dictation as a self-contained, immediately usable prompt addressed to another AI system.",
+            "Lead with the concrete outcome the user wants. Then make the request operational: explain the relevant context, what should be done, the important constraints, and what a successful result should look like.",
+            "Preserve every meaningful fact, reason, example, relationship, dependency, nuance, proper name, URL, filename, technical term, requested deliverable, and explicit limitation from the dictation.",
+            "Use precise, domain-appropriate vocabulary when it makes the request clearer. Translate vague spoken wording into lightly technical, actionable language, but do not add buzzwords, unnecessary architecture, or expertise theater.",
+            "You may make a directly implied requirement explicit when it is necessary to execute the request, but never invent facts, tools, technologies, causes, metrics, deadlines, or product decisions.",
+            "Write in the same language as the dictation. For a request with several requirements, use localized headings for only the useful sections among: Objective, Context, Requirements, Constraints, and Expected result. Keep sections compact, concrete, and free of repetition. For a simple request, use one clear paragraph instead.",
+            "Turn subjective feedback into observable direction without flattening it. Preserve the user's human voice, emotional intensity, priorities, and every stated reason, while removing filler, false starts, and genuine repetition.",
+            "Correct obvious transcription, spelling, grammar, punctuation, and awkward-wording errors when the intended meaning is clear. Keep uncertain wording or unfamiliar technical terms rather than guessing a replacement.",
+            "The result must contain enough detail for the receiving AI to act without rediscovering the user's intent, but no generic padding, redundant summary, fake acceptance criteria, or over-engineered specification.",
+            "Do not answer or execute the request. Return only the finished prompt, without quotes, preamble, analysis, or commentary."
         ]
 
         if let targetApplication {
@@ -175,7 +175,7 @@ public enum PromptBuilder {
             || fingerprint.contains("xcode")
             || fingerprint.contains("visual studio")
             || fingerprint.contains("vscode") {
-            return "The target is a coding tool or agent: preserve commands, identifiers, paths, flags, error messages, and acceptance criteria exactly."
+            return "The target is a coding tool or agent: use natural engineering language, preserve commands, identifiers, paths, flags, and error messages exactly, and translate reported behavior into testable outcomes when the dictation supports them. Do not invent a root cause, architecture, library, or filename."
         }
 
         return "The prompt will be pasted into \(targetApplication.displayName); use that only as light context and never assume capabilities the target may not have."

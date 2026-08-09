@@ -76,7 +76,10 @@ public enum PromptModeRouter {
             return decision(.rewriteWithAI, .detailedDictation, analysis)
         }
 
-        return decision(.direct, .conciseAndClear, analysis)
+        // Prompt Mode is expected to produce a genuine downstream prompt.
+        // Once the dictation is longer than the deliberately cheap 10-word
+        // path, a rewrite is useful even when the source already sounds clear.
+        return decision(.rewriteWithAI, .conciseAndClear, analysis)
     }
 
     private static func decision(
