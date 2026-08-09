@@ -13,7 +13,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - `Escape` cancels the active recording without transcribing or pasting it.
 - Local temporary audio recording, deleted after transcription.
 - OpenAI transcription with French defaults and mixed English vocabulary support.
-- Prompt Mode turns spoken notes into adaptive, actionable AI prompts with a low-latency `gpt-5.6-luna` pass: lightweight for simple requests, structured around the objective, context, requirements, constraints and expected result when the dictation is richer.
+- Prompt Mode turns spoken notes into the clear, actionable prompt a receiving AI would genuinely want: natural prose for simple requests and only as much structure and technical precision as the content actually needs.
 - Mail Mode turns a dictation into a complete ready-to-paste email while preserving the user's voice and technical vocabulary.
 - App-aware prompt hints for Terminal/Codex, Cursor, WhatsApp and Telegram.
 - Local editable dictionary and replacement rules.

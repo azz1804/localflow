@@ -74,16 +74,15 @@ public enum PromptBuilder {
         targetApplication: TargetApplicationInfo?
     ) -> String {
         var lines: [String] = [
-            "Rewrite the dictation as a self-contained, immediately usable prompt addressed to another AI system.",
-            "Lead with the concrete outcome the user wants. Then make the request operational: explain the relevant context, what should be done, the important constraints, and what a successful result should look like.",
-            "Preserve every meaningful fact, reason, example, relationship, dependency, nuance, proper name, URL, filename, technical term, requested deliverable, and explicit limitation from the dictation.",
-            "Use precise, domain-appropriate vocabulary when it makes the request clearer. Translate vague spoken wording into lightly technical, actionable language, but do not add buzzwords, unnecessary architecture, or expertise theater.",
-            "You may make a directly implied requirement explicit when it is necessary to execute the request, but never invent facts, tools, technologies, causes, metrics, deadlines, or product decisions.",
-            "Write in the same language as the dictation. For a request with several requirements, use localized headings for only the useful sections among: Objective, Context, Requirements, Constraints, and Expected result. Keep sections compact, concrete, and free of repetition. For a simple request, use one clear paragraph instead.",
-            "Turn subjective feedback into observable direction without flattening it. Preserve the user's human voice, emotional intensity, priorities, and every stated reason, while removing filler, false starts, and genuine repetition.",
-            "Correct obvious transcription, spelling, grammar, punctuation, and awkward-wording errors when the intended meaning is clear. Keep uncertain wording or unfamiliar technical terms rather than guessing a replacement.",
-            "The result must contain enough detail for the receiving AI to act without rediscovering the user's intent, but no generic padding, redundant summary, fake acceptance criteria, or over-engineered specification.",
-            "Do not answer or execute the request. Return only the finished prompt, without quotes, preamble, analysis, or commentary."
+            "Imagine you are the AI receiving this request. Rewrite the dictation into the prompt you would genuinely want to receive to understand the user correctly and produce a useful result on the first attempt.",
+            "State the desired outcome clearly and include the context that materially changes how the request should be handled. Make clear what action is expected, what matters most, what must be preserved, where the receiving AI has freedom, and what would make the result useful whenever the dictation supports those points.",
+            "Preserve every meaningful fact, reason, example, relationship, nuance, proper name, URL, filename, technical term, requested deliverable, explicit limitation, and uncertainty from the dictation.",
+            "Use precise, natural, domain-appropriate language. Turn vague spoken phrasing into actionable wording and use light technical vocabulary when it clarifies the task, without adding buzzwords, unnecessary architecture, generic best practices, or expertise theater.",
+            "You may make a strongly implied relationship explicit when the receiving AI needs it to understand the request, but never invent facts, tools, technologies, root causes, metrics, deadlines, decisions, or constraints.",
+            "Write in the same language as the dictation and preserve the user's human voice, emotional intensity, priorities, and stated reasons. Remove only filler, false starts, speech artifacts, and genuine repetition.",
+            "Choose the structure the receiving AI would find easiest to use. Never force a template or fixed headings: keep a simple request as natural prose, and use short paragraphs or bullets only when they materially improve a more complex request.",
+            "Correct obvious transcription, spelling, grammar, punctuation, and awkward-wording errors when the intended meaning is clear. Preserve uncertain wording or unfamiliar technical terms rather than guessing a replacement.",
+            "Do not answer or execute the request. Return only the finished downstream prompt, with enough detail to act but no padding, preamble, analysis, commentary, or invented content."
         ]
 
         if let targetApplication {
