@@ -181,6 +181,24 @@ enum FloatingBarPresentationMode: Equatable {
     }
 }
 
+enum FloatingBarPointerInteraction: Equatable {
+    case none
+    case togglePresentation
+    case finishDrag
+
+    static let dragThreshold: CGFloat = 3
+
+    static func resolve(
+        clickCount: Int,
+        displacement: CGFloat
+    ) -> FloatingBarPointerInteraction {
+        if displacement >= dragThreshold {
+            return .finishDrag
+        }
+        return clickCount == 2 ? .togglePresentation : .none
+    }
+}
+
 enum FloatingBarPlacement {
     static let edgeActivationDistance: CGFloat = 104
     static let edgeMargin: CGFloat = 12
@@ -202,21 +220,74 @@ enum FloatingBarPlacement {
         in visibleFrame: NSRect
     ) -> NSPoint {
         NSPoint(
-            x: min(
-                visibleFrame.maxX - panelSize.width / 2 - edgeMargin,
-                max(
-                    visibleFrame.minX + panelSize.width / 2 + edgeMargin,
-                    center.x
-                )
+            x: clampedCoordinate(
+                center.x,
+                panelLength: panelSize.width,
+                minimum: visibleFrame.minX,
+                maximum: visibleFrame.maxX
             ),
-            y: min(
-                visibleFrame.maxY - panelSize.height / 2 - edgeMargin,
-                max(
-                    visibleFrame.minY + panelSize.height / 2 + edgeMargin,
-                    center.y
-                )
+            y: clampedCoordinate(
+                center.y,
+                panelLength: panelSize.height,
+                minimum: visibleFrame.minY,
+                maximum: visibleFrame.maxY
             )
         )
+    }
+
+    static func bestVisibleFrame(
+        for center: NSPoint,
+        among visibleFrames: [NSRect]
+    ) -> NSRect? {
+        if let containingFrame = visibleFrames.first(where: {
+            $0.contains(center)
+        }) {
+            return containingFrame
+        }
+
+        return visibleFrames.min { first, second in
+            squaredDistance(from: center, to: first)
+                < squaredDistance(from: center, to: second)
+        }
+    }
+
+    private static func clampedCoordinate(
+        _ coordinate: CGFloat,
+        panelLength: CGFloat,
+        minimum: CGFloat,
+        maximum: CGFloat
+    ) -> CGFloat {
+        let lowerBound = minimum + panelLength / 2 + edgeMargin
+        let upperBound = maximum - panelLength / 2 - edgeMargin
+        guard lowerBound <= upperBound else {
+            return (minimum + maximum) / 2
+        }
+        return min(upperBound, max(lowerBound, coordinate))
+    }
+
+    private static func squaredDistance(
+        from point: NSPoint,
+        to rect: NSRect
+    ) -> CGFloat {
+        let deltaX: CGFloat
+        if point.x < rect.minX {
+            deltaX = rect.minX - point.x
+        } else if point.x > rect.maxX {
+            deltaX = point.x - rect.maxX
+        } else {
+            deltaX = 0
+        }
+
+        let deltaY: CGFloat
+        if point.y < rect.minY {
+            deltaY = rect.minY - point.y
+        } else if point.y > rect.maxY {
+            deltaY = point.y - rect.maxY
+        } else {
+            deltaY = 0
+        }
+
+        return deltaX * deltaX + deltaY * deltaY
     }
 }
 
@@ -393,7 +464,7 @@ final class FloatingBarController {
         contentView.onOutputModeChange = { [weak self] mode in
             self?.onOutputModeChange?(mode)
         }
-        contentView.onBackgroundClick = { [weak self] in
+        contentView.onPresentationToggleRequested = { [weak self] in
             self?.toggleCompactPresentation()
         }
         contentView.onDragEnded = { [weak self] in
@@ -452,16 +523,24 @@ final class FloatingBarController {
         guard !hasPositionedPanel else {
             return
         }
-        guard let screen = NSScreen.main else {
+        guard let mainScreen = NSScreen.main else {
             return
         }
 
-        let visible = screen.visibleFrame
         let storedCenter = storedPanelCenter()
-        let center = storedCenter ?? NSPoint(
-            x: visible.midX,
-            y: visible.minY + 50 + Self.panelSize.height / 2
-        )
+        let mainVisibleFrame = mainScreen.visibleFrame
+        let center: NSPoint
+        let visible: NSRect
+        if let storedCenter {
+            center = storedCenter
+            visible = visibleFrame(for: storedCenter) ?? mainVisibleFrame
+        } else {
+            visible = mainVisibleFrame
+            center = NSPoint(
+                x: visible.midX,
+                y: visible.minY + 50 + Self.panelSize.height / 2
+            )
+        }
         let expandedMode = FloatingBarPlacement.expandedMode(
             forCenter: center,
             in: visible
@@ -479,34 +558,37 @@ final class FloatingBarController {
     }
 
     private func toggleCompactPresentation() {
-        guard let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+        let currentCenter = NSPoint(
+            x: panel.frame.midX,
+            y: panel.frame.midY
+        )
+        guard let visible = visibleFrame(for: currentCenter) else {
             return
         }
-        let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
         let nextMode: FloatingBarPresentationMode
         if presentationMode == .compact {
             nextMode = FloatingBarPlacement.expandedMode(
-                forCenter: center,
+                forCenter: currentCenter,
                 in: visible
             )
         } else {
             nextMode = .compact
         }
-        setPresentationMode(
+        let settledCenter = setPresentationMode(
             nextMode,
-            centeredAt: center,
+            centeredAt: currentCenter,
             in: visible,
             animated: true
         )
         defaults.set(nextMode == .compact, forKey: DefaultsKey.isCompact)
-        persistPanelCenter()
+        persistPanelCenter(settledCenter)
     }
 
     private func finishPanelDrag() {
-        guard let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+        var center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        guard let visible = visibleFrame(for: center) else {
             return
         }
-        var center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
         if presentationMode != .compact {
             let nextMode = FloatingBarPlacement.expandedMode(
                 forCenter: center,
@@ -522,7 +604,7 @@ final class FloatingBarController {
                         - nextMode.panelSize.width / 2
                         - FloatingBarPlacement.edgeMargin
             }
-            setPresentationMode(
+            center = setPresentationMode(
                 nextMode,
                 centeredAt: center,
                 in: visible,
@@ -540,16 +622,18 @@ final class FloatingBarController {
                     y: clamped.y - panel.frame.height / 2
                 )
             )
+            center = clamped
         }
-        persistPanelCenter()
+        persistPanelCenter(center)
     }
 
+    @discardableResult
     private func setPresentationMode(
         _ mode: FloatingBarPresentationMode,
         centeredAt requestedCenter: NSPoint,
         in visible: NSRect,
         animated: Bool
-    ) {
+    ) -> NSPoint {
         presentationMode = mode
         let size = mode.panelSize
         let center = FloatingBarPlacement.clampedCenter(
@@ -570,6 +654,14 @@ final class FloatingBarController {
             animate: animated
                 && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         )
+        return center
+    }
+
+    private func visibleFrame(for center: NSPoint) -> NSRect? {
+        FloatingBarPlacement.bestVisibleFrame(
+            for: center,
+            among: NSScreen.screens.map(\.visibleFrame)
+        ) ?? panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
     }
 
     private func storedPanelCenter() -> NSPoint? {
@@ -583,9 +675,9 @@ final class FloatingBarController {
         )
     }
 
-    private func persistPanelCenter() {
-        defaults.set(panel.frame.midX, forKey: DefaultsKey.centerX)
-        defaults.set(panel.frame.midY, forKey: DefaultsKey.centerY)
+    private func persistPanelCenter(_ center: NSPoint) {
+        defaults.set(center.x, forKey: DefaultsKey.centerX)
+        defaults.set(center.y, forKey: DefaultsKey.centerY)
     }
 
     private func showPanel() {
@@ -644,7 +736,7 @@ final class FloatingBarView: NSView {
     private var outputMode = DictationOutputMode.transcript
     private var presentationMode = FloatingBarPresentationMode.horizontal
     var onOutputModeChange: ((DictationOutputMode) -> Void)?
-    var onBackgroundClick: (() -> Void)?
+    var onPresentationToggleRequested: (() -> Void)?
     var onDragEnded: (() -> Void)?
     private var displayedEnvelope = Array(
         repeating: Float(0),
@@ -1247,7 +1339,9 @@ final class FloatingBarView: NSView {
             }
 
             guard let window else {
-                onBackgroundClick?()
+                if callbackEvent.value.clickCount == 2 {
+                    onPresentationToggleRequested?()
+                }
                 return
             }
             let initialOrigin = window.frame.origin
@@ -1256,10 +1350,16 @@ final class FloatingBarView: NSView {
                 window.frame.origin.x - initialOrigin.x,
                 window.frame.origin.y - initialOrigin.y
             )
-            if distance >= 3 {
+            switch FloatingBarPointerInteraction.resolve(
+                clickCount: callbackEvent.value.clickCount,
+                displacement: distance
+            ) {
+            case .finishDrag:
                 onDragEnded?()
-            } else {
-                onBackgroundClick?()
+            case .togglePresentation:
+                onPresentationToggleRequested?()
+            case .none:
+                break
             }
         }
     }
@@ -1269,9 +1369,9 @@ final class FloatingBarView: NSView {
         if let hoveredOutputMode {
             toolTip = "Activer \(hoveredOutputMode.displayName)"
         } else if presentationMode == .compact {
-            toolTip = "Cliquer pour déployer · Glisser pour déplacer"
+            toolTip = "Double-cliquer pour déployer · Glisser pour déplacer"
         } else {
-            toolTip = "Cliquer pour réduire · Glisser pour déplacer"
+            toolTip = "Double-cliquer pour réduire · Glisser pour déplacer"
         }
         needsDisplay = true
     }
@@ -1399,7 +1499,7 @@ final class FloatingBarView: NSView {
 
     private func updateOutputModeAccessibility() {
         setAccessibilityHelp(
-            "Mode: \(outputMode.displayName). Choose a named mode, click the bar to resize it, or drag it to move it."
+            "Mode: \(outputMode.displayName). Choose a named mode, double-click the bar to resize it, or drag it to move it."
         )
     }
 

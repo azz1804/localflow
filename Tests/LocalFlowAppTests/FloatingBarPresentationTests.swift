@@ -165,6 +165,95 @@ final class FloatingBarPresentationTests: XCTestCase {
         )
     }
 
+    func testSingleClickDoesNotResizeTheBar() {
+        XCTAssertEqual(
+            FloatingBarPointerInteraction.resolve(
+                clickCount: 1,
+                displacement: 0
+            ),
+            .none
+        )
+    }
+
+    func testDoubleClickResizesTheBarExactlyOnce() {
+        XCTAssertEqual(
+            FloatingBarPointerInteraction.resolve(
+                clickCount: 2,
+                displacement: 0
+            ),
+            .togglePresentation
+        )
+        XCTAssertEqual(
+            FloatingBarPointerInteraction.resolve(
+                clickCount: 3,
+                displacement: 0
+            ),
+            .none
+        )
+    }
+
+    func testDragAlwaysWinsOverClickCount() {
+        XCTAssertEqual(
+            FloatingBarPointerInteraction.resolve(
+                clickCount: 2,
+                displacement: FloatingBarPointerInteraction.dragThreshold
+            ),
+            .finishDrag
+        )
+    }
+
+    func testPlacementKeepsEveryPresentationInsideTheVisibleFrame() {
+        let visible = NSRect(x: -1_920, y: 0, width: 1_920, height: 1_080)
+
+        for mode in [
+            FloatingBarPresentationMode.horizontal,
+            .vertical,
+            .compact
+        ] {
+            let center = FloatingBarPlacement.clampedCenter(
+                NSPoint(x: -4_000, y: 2_000),
+                panelSize: mode.panelSize,
+                in: visible
+            )
+            let frame = NSRect(
+                x: center.x - mode.panelSize.width / 2,
+                y: center.y - mode.panelSize.height / 2,
+                width: mode.panelSize.width,
+                height: mode.panelSize.height
+            )
+
+            XCTAssertGreaterThanOrEqual(
+                frame.minX,
+                visible.minX + FloatingBarPlacement.edgeMargin
+            )
+            XCTAssertLessThanOrEqual(
+                frame.maxX,
+                visible.maxX - FloatingBarPlacement.edgeMargin
+            )
+            XCTAssertGreaterThanOrEqual(
+                frame.minY,
+                visible.minY + FloatingBarPlacement.edgeMargin
+            )
+            XCTAssertLessThanOrEqual(
+                frame.maxY,
+                visible.maxY - FloatingBarPlacement.edgeMargin
+            )
+        }
+    }
+
+    func testPlacementChoosesTheScreenContainingTheBarCenter() {
+        let left = NSRect(x: -1_920, y: 0, width: 1_920, height: 1_080)
+        let right = NSRect(x: 0, y: 0, width: 1_440, height: 900)
+
+        XCTAssertEqual(
+            FloatingBarPlacement.bestVisibleFrame(
+                for: NSPoint(x: -800, y: 500),
+                among: [right, left]
+            ),
+            left
+        )
+    }
+
     func testEveryOrbProducesADistinctBarAtmosphere() {
         let palettes = OrbEvolution.themes.map(FloatingBarPalette.init)
         let signatures = Set(
