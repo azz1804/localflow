@@ -394,6 +394,13 @@ final class SettingsWindowController: NSWindowController {
         model.selectedSection = .home
     }
 
+    func selectSettingsTab(message: String? = nil) {
+        model.selectedSection = .settings
+        if let message {
+            model.showStatus(message, isError: true)
+        }
+    }
+
     private func configureModelActions() {
         model.saveSettingsHandler = { [weak self] configuration in
             self?.onSaveSettings?(configuration) ?? .success(())

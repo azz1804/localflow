@@ -31,7 +31,8 @@ final class EnvLoaderTests: XCTestCase {
             "ENABLE_PROMPT_MODE": "true",
             "ENABLE_MAIL_MODE": "false",
             "PROMPT_MODEL": "gpt-prompt-test",
-            "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH": "false"
+            "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH": "false",
+            "ENABLE_DOUBLE_CLAP_CONTROL": "true"
         ])
 
         XCTAssertTrue(configuration.isOpenAIConfigured)
@@ -45,6 +46,7 @@ final class EnvLoaderTests: XCTestCase {
         XCTAssertEqual(configuration.pasteRestoreDelayMilliseconds, 1200)
         XCTAssertEqual(configuration.orbThemeOverride, "solar-nova")
         XCTAssertFalse(configuration.preferBuiltInMicrophoneForBluetooth)
+        XCTAssertTrue(configuration.enableDoubleClapControl)
     }
 
     func testNonPositiveHistoryRetentionUsesForeverWithoutAllowingNegatives() {
@@ -76,7 +78,8 @@ final class EnvLoaderTests: XCTestCase {
             restoreClipboardAfterPaste: false,
             pasteRestoreDelayMilliseconds: 500,
             orbThemeOverride: "cosmic-ink",
-            preferBuiltInMicrophoneForBluetooth: false
+            preferBuiltInMicrophoneForBluetooth: false,
+            enableDoubleClapControl: true
         )
 
         let parsed = EnvLoader.parse(configuration.envFileContents())
@@ -92,6 +95,10 @@ final class EnvLoaderTests: XCTestCase {
         XCTAssertTrue(
             AppConfiguration(env: [:])
                 .preferBuiltInMicrophoneForBluetooth
+        )
+        XCTAssertFalse(AppConfiguration().enableDoubleClapControl)
+        XCTAssertFalse(
+            AppConfiguration(env: [:]).enableDoubleClapControl
         )
     }
 

@@ -39,6 +39,8 @@ Install or update LocalFlow with one Terminal command:
 
 The installer downloads the latest source, builds LocalFlow, installs it in `/Applications`, and launches it. On a first install, it can securely prompt for the OpenAI API key with hidden input. Existing settings and history are preserved during updates.
 
+If an earlier installation contains an empty or placeholder API key, rerunning the same command now offers to repair the key while preserving modes, hotkeys, themes, and history.
+
 If Xcode Command Line Tools are missing, macOS opens their installer. Once it finishes, run the command again.
 
 ### Manual install
@@ -122,13 +124,14 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hold `Fn` to record, then release to transcribe and paste.
 - If `Fn` conflicts with macOS, hold `Option+Space`.
 - Press `Fn+Space` to start/stop toggle recording.
+- Optionally enable `Double-clap control` in Settings, then clap twice to start or finish a hands-free dictation. LocalFlow listens through the built-in Mac microphone while idle to avoid degrading AirPods playback.
 - Press `Escape` to discard the active recording without transcribing or pasting it.
 - When AirPods or another Bluetooth headset is selected as the microphone, LocalFlow uses the built-in Mac microphone by default to preserve high-quality Bluetooth playback. Disable `Protect AirPods audio` in Settings if you explicitly want the headset microphone.
 - Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, Prompt Mode, Mail Mode, opening LocalFlow and quitting.
 - Switch directly between Raw mode, Prompt, and Mail from the Home dashboard or from the three-way control in the recording bar. The choice is saved automatically.
-- Click the recording bar to collapse it into an orb, click the orb to expand it, or drag either form anywhere on screen. The expanded bar automatically becomes vertical when placed near the left or right edge.
+- Double-click the recording bar to collapse it into an orb, double-click the orb to expand it, or drag either form anywhere on screen. The expanded bar automatically becomes vertical when placed near the left or right edge.
 - Enable `Prompt Mode` to remove speech artifacts and clarify the goal, context, constraints, and expected output without answering or inventing details. Detailed dictations retain their full context, first-person voice, emotional intensity, and stated rationale.
 - Enable `Mail Mode` to add a subject, greeting, readable paragraphs and closing without inventing a recipient or missing context.
 - Choose `Open History` from the menu bar icon for instant access to recent transcripts.
@@ -155,7 +158,7 @@ Open it from `LF > Open LocalFlow`.
 - `History`: search and browse transcripts grouped by day, inspect raw/final text, copy an item or clear local history.
 - `Words & Stats`: track total words, dictation speed, voice time, estimated time saved, streaks and top applications.
 - `Dictionary`: edit vocabulary terms and replacement rules. Terms are one per line. Replacements use `spoken phrase = final text`.
-- `Settings`: choose Raw, Prompt, or Mail output; edit the OpenAI key, models, language, hotkeys, clipboard restore and history retention.
+- `Settings`: choose Raw, Prompt, or Mail output; edit the OpenAI key, models, language, hotkeys, double-clap control, clipboard restore and history retention.
 - `Diagnostics`: inspect hotkey status, permissions, file paths and logs, or restart the hotkey engine.
 
 Settings are saved to:
@@ -211,7 +214,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 85 unit tests passing.
+- `swift test`: 191 unit tests passing (2 optional paid API evaluations skipped by default).
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.
@@ -226,6 +229,7 @@ Live transcription requires a valid `OPENAI_API_KEY` in `~/Library/Application S
 - After pressing `Fn`, open `LF > Open LocalFlow > Diagnostics` and check `Last hotkey`. `Fn via HID` means LocalFlow caught it through the low-level listener; if it still says `none`, macOS did not deliver the key event to LocalFlow.
 - `Option+Space` does nothing: open `LF > Open LocalFlow > Diagnostics` and check the hotkey status or diagnostic log.
 - OpenAI error appears in the floating bar: check `OPENAI_API_KEY`, model names and network access.
+- If LocalFlow only shows the error symbol, open the menu-bar orb and choose `Open LocalFlow`. Authentication and model-access failures now open `Settings` automatically with the exact corrective message.
 - Clipboard content changes briefly: this is expected; LocalFlow restores it after paste by default.
 - If macOS shows LocalFlow as enabled but LocalFlow still reports missing permission, remove the old LocalFlow entry from that permission pane, run `./Scripts/install_app.sh`, and add `/Applications/LocalFlow.app` again.
 - Diagnostics are written to `~/Library/Application Support/LocalFlow/localflow.log`.

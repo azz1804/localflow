@@ -30,9 +30,49 @@ fi
 SUPPORT_DIR="$HOME/Library/Application Support/LocalFlow"
 SUPPORT_ENV="$SUPPORT_DIR/.env"
 
+has_usable_api_key() {
+  [[ -f "$1" ]] || return 1
+  awk -F= '
+    /^OPENAI_API_KEY=/ {
+      value = substr($0, index($0, "=") + 1)
+      gsub(/^[[:space:]\"]+|[[:space:]\"]+$/, "", value)
+      if (value ~ /^sk-[A-Za-z0-9_-]{16,}$/ && value != "sk-your-key") {
+        found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
 if [[ -f "$ROOT_DIR/.env" && ! -f "$SUPPORT_ENV" ]]; then
   mkdir -p "$SUPPORT_DIR"
   cp "$ROOT_DIR/.env" "$SUPPORT_ENV"
+elif [[ -f "$ROOT_DIR/.env" ]] \
+    && has_usable_api_key "$ROOT_DIR/.env" \
+    && ! has_usable_api_key "$SUPPORT_ENV"; then
+  # Repair only the key and retain the user's modes, hotkeys, and themes.
+  mkdir -p "$SUPPORT_DIR"
+  API_KEY="$(awk -F= '/^OPENAI_API_KEY=/ { print substr($0, index($0, "=") + 1); exit }' "$ROOT_DIR/.env")"
+  TEMP_ENV="$(mktemp "$SUPPORT_DIR/.env.installing.XXXXXX")"
+  REPLACED=0
+  if [[ -f "$SUPPORT_ENV" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == OPENAI_API_KEY=* ]]; then
+        printf 'OPENAI_API_KEY=%s\n' "$API_KEY" >> "$TEMP_ENV"
+        REPLACED=1
+      else
+        printf '%s\n' "$line" >> "$TEMP_ENV"
+      fi
+    done < "$SUPPORT_ENV"
+  else
+    cp "$ROOT_DIR/.env.example" "$TEMP_ENV"
+  fi
+  if [[ "$REPLACED" != "1" ]]; then
+    printf 'OPENAI_API_KEY=%s\n' "$API_KEY" >> "$TEMP_ENV"
+  fi
+  chmod 600 "$TEMP_ENV"
+  mv "$TEMP_ENV" "$SUPPORT_ENV"
+  unset API_KEY
 fi
 
 if [[ -f "$SUPPORT_ENV" ]]; then

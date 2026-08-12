@@ -42,7 +42,7 @@ public enum OpenAIClientError: Error, LocalizedError {
         case .invalidResponse:
             return "OpenAI returned an invalid response."
         case let .badStatus(statusCode, body):
-            return "OpenAI request failed with HTTP \(statusCode): \(body)"
+            return "OpenAI request failed (HTTP \(statusCode)): \(Self.apiMessage(from: body))"
         case .emptyTranscription:
             return "OpenAI returned an empty transcription."
         case .emptyPolishResponse:
@@ -56,6 +56,28 @@ public enum OpenAIClientError: Error, LocalizedError {
         case let .audioFileTooLarge(actualBytes, maximumBytes):
             return "The audio recording is too large to upload (\(actualBytes) bytes; maximum \(maximumBytes) bytes)."
         }
+    }
+
+    private static func apiMessage(from body: String) -> String {
+        struct ErrorEnvelope: Decodable {
+            struct APIError: Decodable {
+                var message: String
+            }
+            var error: APIError
+        }
+
+        if let data = body.data(using: .utf8),
+           let message = try? JSONDecoder().decode(
+                ErrorEnvelope.self,
+                from: data
+           ).error.message.trimmingCharacters(
+                in: .whitespacesAndNewlines
+           ),
+           !message.isEmpty {
+            return message
+        }
+        let normalized = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? "No error details were returned." : normalized
     }
 }
 

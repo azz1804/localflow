@@ -141,7 +141,8 @@ final class AudioRecorder {
     }
 
     func start(
-        preferBuiltInMicrophoneForBluetooth: Bool = true
+        preferBuiltInMicrophoneForBluetooth: Bool = true,
+        detectsDoubleClap: Bool = false
     ) async throws {
         guard !isRecording else {
             throw AudioRecorderError.alreadyRecording
@@ -175,7 +176,8 @@ final class AudioRecorder {
             }
             try await startCaptureWithRouteRecovery(
                 recordingURL: url,
-                route: route
+                route: route,
+                detectsDoubleClap: detectsDoubleClap
             )
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o600],
@@ -194,10 +196,14 @@ final class AudioRecorder {
 
     private func startCaptureWithRouteRecovery(
         recordingURL: URL,
-        route: AudioInputRoutePreparation?
+        route: AudioInputRoutePreparation?,
+        detectsDoubleClap: Bool
     ) async throws {
         do {
-            try capture.start(recordingURL: recordingURL)
+            try capture.start(
+                recordingURL: recordingURL,
+                detectsDoubleClap: detectsDoubleClap
+            )
         } catch {
             let errorCode = (error as NSError).code
             guard route?.didSwitchDevice == true
@@ -210,7 +216,10 @@ final class AudioRecorder {
             )
             try? capture.stop()
             try await Task.sleep(for: .milliseconds(180))
-            try capture.start(recordingURL: recordingURL)
+            try capture.start(
+                recordingURL: recordingURL,
+                detectsDoubleClap: detectsDoubleClap
+            )
         }
     }
 
@@ -293,6 +302,10 @@ final class AudioRecorder {
             return .silent
         }
         return capture.currentFrame()
+    }
+
+    func consumeDoubleClapDetection() -> Bool {
+        isRecording && capture.consumeDoubleClapDetection()
     }
 
     private func scheduleDurationLimit() {

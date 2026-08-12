@@ -73,23 +73,66 @@ fi
 SUPPORT_DIR="$HOME/Library/Application Support/LocalFlow"
 SUPPORT_ENV="$SUPPORT_DIR/.env"
 
-if [[ -f "$SUPPORT_ENV" ]]; then
+has_usable_api_key() {
+  [[ -f "$1" ]] || return 1
+  awk -F= '
+    /^OPENAI_API_KEY=/ {
+      value = substr($0, index($0, "=") + 1)
+      gsub(/^[[:space:]\"]+|[[:space:]\"]+$/, "", value)
+      if (value ~ /^sk-[A-Za-z0-9_-]{16,}$/ && value != "sk-your-key") {
+        found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
+save_api_key() {
+  local api_key="$1"
+  local base_file="$2"
+  local destination="$3"
+  local temporary
+  local replaced=0
+
+  mkdir -p "$(dirname "$destination")"
+  temporary="$(mktemp "$(dirname "$destination")/.env.installing.XXXXXX")"
+  umask 077
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == OPENAI_API_KEY=* ]]; then
+      printf 'OPENAI_API_KEY=%s\n' "$api_key" >> "$temporary"
+      replaced=1
+    else
+      printf '%s\n' "$line" >> "$temporary"
+    fi
+  done < "$base_file"
+  if [[ "$replaced" != "1" ]]; then
+    printf 'OPENAI_API_KEY=%s\n' "$api_key" >> "$temporary"
+  fi
+  chmod 600 "$temporary"
+  mv "$temporary" "$destination"
+}
+
+has_interactive_terminal() {
+  [[ -t 0 || -t 1 || -t 2 ]]
+}
+
+if has_usable_api_key "$SUPPORT_ENV"; then
   info "Keeping the existing LocalFlow configuration."
-elif [[ "$SKIP_API_KEY" != "1" && -t 0 ]]; then
+elif [[ "$SKIP_API_KEY" != "1" ]] && has_interactive_terminal; then
+  if [[ -f "$SUPPORT_ENV" ]]; then
+    info "The existing configuration has no usable OpenAI API key."
+  fi
   printf '\nOpenAI API key (input hidden, press Return to configure it later): ' > /dev/tty
   API_KEY=""
   IFS= read -r -s API_KEY < /dev/tty || true
   printf '\n' > /dev/tty
 
   if [[ -n "$API_KEY" ]]; then
-    umask 077
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == OPENAI_API_KEY=* ]]; then
-        printf 'OPENAI_API_KEY=%s\n' "$API_KEY"
-      else
-        printf '%s\n' "$line"
-      fi
-    done < "$SOURCE_DIR/.env.example" > "$SOURCE_DIR/.env"
+    BASE_ENV="$SOURCE_DIR/.env.example"
+    if [[ -f "$SUPPORT_ENV" ]]; then
+      BASE_ENV="$SUPPORT_ENV"
+    fi
+    save_api_key "$API_KEY" "$BASE_ENV" "$SUPPORT_ENV"
     unset API_KEY
   fi
 fi
@@ -100,7 +143,7 @@ LOCALFLOW_SKIP_LAUNCH="${LOCALFLOW_SKIP_LAUNCH:-0}" \
 
 info "Installed in $DEST_DIR/LocalFlow.app"
 
-if [[ ! -f "$SUPPORT_ENV" ]]; then
+if ! has_usable_api_key "$SUPPORT_ENV"; then
   printf 'Add your OpenAI key in LocalFlow > Settings before your first dictation.\n'
 fi
 

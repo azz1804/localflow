@@ -738,7 +738,7 @@ final class SignalAccumulator: @unchecked Sendable {
     }
 }
 
-private final class LockFreeAtomicInt32: @unchecked Sendable {
+final class LockFreeAtomicInt32: @unchecked Sendable {
     private let storage: UnsafeMutablePointer<Int32>
 
     init(_ value: Int32) {
@@ -1087,11 +1087,15 @@ final class MicrophoneAudioCapture {
     private let accumulator = SignalAccumulator()
     private var captureSink: AudioCaptureSink?
     private var analysisWorker: AudioAnalysisWorker?
+    private var doubleClapAnalyzer: RealtimeDoubleClapAnalyzer?
     private var drainNode: AVAudioSinkNode?
     private var tapIsInstalled = false
     private var isRunning = false
 
-    func start(recordingURL: URL) throws {
+    func start(
+        recordingURL: URL,
+        detectsDoubleClap: Bool = false
+    ) throws {
         try? stop()
 
         let engine = AVAudioEngine()
@@ -1104,8 +1108,12 @@ final class MicrophoneAudioCapture {
         }
         let captureSink = AudioCaptureSink(recordingURL: recordingURL)
         let analysisWorker = AudioAnalysisWorker(accumulator: accumulator)
+        let doubleClapAnalyzer = detectsDoubleClap
+            ? RealtimeDoubleClapAnalyzer()
+            : nil
         let drainNode = Self.makeDrainNode(
             analysisWorker: analysisWorker,
+            doubleClapAnalyzer: doubleClapAnalyzer,
             sampleRate: currentFormat.sampleRate,
             isInterleaved: currentFormat.isInterleaved
         )
@@ -1119,6 +1127,7 @@ final class MicrophoneAudioCapture {
         analysisWorker.start()
         self.captureSink = captureSink
         self.analysisWorker = analysisWorker
+        self.doubleClapAnalyzer = doubleClapAnalyzer
         self.drainNode = drainNode
 
         input.installTap(
@@ -1143,6 +1152,7 @@ final class MicrophoneAudioCapture {
             analysisWorker.stop()
             try? captureSink.finish()
             self.analysisWorker = nil
+            self.doubleClapAnalyzer = nil
             self.captureSink = nil
             self.drainNode = nil
             engine.reset()
@@ -1155,6 +1165,7 @@ final class MicrophoneAudioCapture {
         guard let engine else {
             analysisWorker?.stop()
             analysisWorker = nil
+            doubleClapAnalyzer = nil
             let captureSink = captureSink
             self.captureSink = nil
             try captureSink?.finish()
@@ -1176,6 +1187,7 @@ final class MicrophoneAudioCapture {
         }
         analysisWorker?.stop()
         analysisWorker = nil
+        doubleClapAnalyzer = nil
 
         let captureSink = captureSink
         self.captureSink = nil
@@ -1190,6 +1202,10 @@ final class MicrophoneAudioCapture {
         accumulator.snapshot()
     }
 
+    func consumeDoubleClapDetection() -> Bool {
+        doubleClapAnalyzer?.consumeDetection() == true
+    }
+
     private nonisolated static func makeTapBlock(
         captureSink: AudioCaptureSink
     ) -> AVAudioNodeTapBlock {
@@ -1200,6 +1216,7 @@ final class MicrophoneAudioCapture {
 
     private nonisolated static func makeDrainNode(
         analysisWorker: AudioAnalysisWorker,
+        doubleClapAnalyzer: RealtimeDoubleClapAnalyzer?,
         sampleRate: Double,
         isInterleaved: Bool
     ) -> AVAudioSinkNode {
@@ -1224,6 +1241,12 @@ final class MicrophoneAudioCapture {
             }
 
             analysisWorker.enqueue(
+                samples: rawData.assumingMemoryBound(to: Float.self),
+                stride: stride,
+                frameCount: safeFrameCount,
+                sampleRate: sampleRate
+            )
+            doubleClapAnalyzer?.consume(
                 samples: rawData.assumingMemoryBound(to: Float.self),
                 stride: stride,
                 frameCount: safeFrameCount,

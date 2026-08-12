@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var dictationController: DictationController?
     private var hotkeyController: HotkeyController?
+    private var doubleClapController: DoubleClapController?
     private var floatingBarController: FloatingBarController?
     private var settingsWindowController: SettingsWindowController?
     private var accessibilityRetryTimer: Timer?
@@ -108,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         accessibilityRetryTimer?.invalidate()
+        doubleClapController?.stop()
         hotkeyController?.stop()
         LocalFlowLogger.flush()
     }
@@ -233,6 +235,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let floatingBarController = FloatingBarController()
+        let doubleClapController = DoubleClapController()
+        doubleClapController.onDoubleClap = { [weak dictationController] in
+            dictationController?.toggleRecordingFromDoubleClap()
+        }
         floatingBarController.onOutputModeChange = { [weak self] mode in
             guard let self else {
                 return
@@ -249,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 visualization: visualization
             )
             self?.updateMenu(for: status)
+            self?.doubleClapController?.update(status: status)
             if case .recording = status {
                 self?.hotkeyController?.setApplicationRecordingActive(true)
                 return
@@ -270,6 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationController.onInsertionCompleted = { [weak self] outcome in
             self?.settingsWindowController?.showInsertionOutcome(outcome)
         }
+        dictationController.onSetupRequired = { [weak self] message in
+            self?.presentSettingsForSetup(message: message)
+        }
 
         let hotkeyController = HotkeyController(
             holdHotkey: configuration.holdHotkey,
@@ -287,6 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.dictationController = dictationController
         self.floatingBarController = floatingBarController
         self.hotkeyController = hotkeyController
+        self.doubleClapController = doubleClapController
+        doubleClapController.update(configuration: configuration)
+        doubleClapController.update(status: .idle)
         floatingBarController.updateOutputMode(configuration.outputMode)
         refreshOrbProgression()
         refreshPermissionMenuState()
@@ -708,6 +721,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsWindowController = settingsWindowController
     }
 
+    private func presentSettingsForSetup(message: String) {
+        presentMainWindow(selectHistory: false)
+        settingsWindowController?.selectSettingsTab(message: message)
+    }
+
     @objc nonisolated private func reloadConfiguration() {
         AppKitMainThreadBridge.run {
             reloadConfigurationOnMainActor()
@@ -718,6 +736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try loadRuntimeConfiguration()
             dictationController?.updateConfiguration(configuration, dictionary: dictionary)
+            doubleClapController?.update(configuration: configuration)
             restartHotkeys()
             updateOutputModeMenuItems()
             showMainWindow()
@@ -952,6 +971,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.historyRecordsCache = try historyStore.load()
                 self.refreshOrbProgression()
                 self.dictationController?.updateConfiguration(updatedConfiguration, dictionary: self.dictionary)
+                self.doubleClapController?.update(
+                    configuration: updatedConfiguration
+                )
                 self.restartHotkeys()
                 self.updateOutputModeMenuItems()
                 return .success(())

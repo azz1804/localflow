@@ -7,6 +7,7 @@ final class DictationController {
     var onRecordingFrame: ((AppStatus, AudioVisualizationFrame) -> Void)?
     var onHistoryRecordCreated: ((DictationRecord) -> Void)?
     var onInsertionCompleted: ((TextInsertionOutcome) -> Void)?
+    var onSetupRequired: ((String) -> Void)?
 
     var canCancelRecording: Bool {
         pendingRecordingStartTask != nil
@@ -36,6 +37,7 @@ final class DictationController {
     private var finalizationTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
     private var pendingRecordingMode: RecordingMode?
+    private var pendingDoubleClapTargetRestoration = false
     private var activePendingJobID: UUID?
     private var completedForegroundStatus: AppStatus?
     private var finalizationGeneration = UUID()
@@ -133,6 +135,20 @@ final class DictationController {
         }
     }
 
+    func toggleRecordingFromDoubleClap() {
+        switch status {
+        case .idle, .done, .error:
+            scheduleRecordingStart(
+                mode: .toggle,
+                restoresExternalTarget: true
+            )
+        case .recording:
+            requestRecordingStop()
+        case .processing:
+            break
+        }
+    }
+
     func cancelRecording() {
         if finalizationTask != nil || isFinalizingRecording {
             finalizationGeneration = UUID()
@@ -213,7 +229,10 @@ final class DictationController {
         requestRecordingStop()
     }
 
-    private func scheduleRecordingStart(mode: RecordingMode) {
+    private func scheduleRecordingStart(
+        mode: RecordingMode,
+        restoresExternalTarget: Bool = false
+    ) {
         interruptPendingRecoveryForRecording()
         guard pendingRecordingStartTask == nil,
               !isStarting,
@@ -225,14 +244,21 @@ final class DictationController {
         }
 
         pendingRecordingMode = mode
+        pendingDoubleClapTargetRestoration = restoresExternalTarget
         pendingRecordingStartTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else {
                 return
             }
             let requestedMode = self.pendingRecordingMode ?? mode
+            let shouldRestoreExternalTarget =
+                self.pendingDoubleClapTargetRestoration
             self.pendingRecordingStartTask = nil
             self.pendingRecordingMode = nil
-            await self.startRecording(mode: requestedMode)
+            self.pendingDoubleClapTargetRestoration = false
+            await self.startRecording(
+                mode: requestedMode,
+                restoresExternalTarget: shouldRestoreExternalTarget
+            )
         }
     }
 
@@ -244,11 +270,15 @@ final class DictationController {
         pendingRecordingStartTask.cancel()
         self.pendingRecordingStartTask = nil
         pendingRecordingMode = nil
+        pendingDoubleClapTargetRestoration = false
         recordingMode = .hold
         return true
     }
 
-    private func startRecording(mode: RecordingMode) async {
+    private func startRecording(
+        mode: RecordingMode,
+        restoresExternalTarget: Bool
+    ) async {
         guard !isStarting,
               finalizationTask == nil,
               !isFinalizingRecording,
@@ -259,7 +289,9 @@ final class DictationController {
 
         guard openAIClient != nil else {
             LocalFlowLogger.log("Recording start failed missing OpenAI key")
-            setStatus(.error("Missing OPENAI_API_KEY in .env"))
+            let message = "Add a valid OpenAI API key in LocalFlow Settings."
+            setStatus(.error(message))
+            onSetupRequired?(message)
             return
         }
 
@@ -270,6 +302,10 @@ final class DictationController {
         setStatus(.recording(0, recordingMode))
 
         do {
+            if restoresExternalTarget {
+                await activeApplicationProvider
+                    .restoreExternalTargetForDoubleClap()
+            }
             recordingTargetApplication = activeApplicationProvider.currentApplication()
             recordingInsertionTarget = insertionService.captureTarget()
             LocalFlowLogger.log(
@@ -277,7 +313,9 @@ final class DictationController {
             )
             try await audioRecorder.start(
                 preferBuiltInMicrophoneForBluetooth:
-                    configuration.preferBuiltInMicrophoneForBluetooth
+                    configuration.preferBuiltInMicrophoneForBluetooth,
+                detectsDoubleClap:
+                    configuration.enableDoubleClapControl
             )
             recordingStartedAt = Date()
             isStarting = false
@@ -779,10 +817,12 @@ final class DictationController {
             language: parameters.transcriptionLanguage
         )
         let inferenceStartedAt = ProcessInfo.processInfo.systemUptime
+        var uploadURL = optimizedUpload.fileURL
+        var retriedWithOriginalAudio = false
         while true {
             do {
                 job.transcribedText = try await client.transcribeAudio(
-                    fileURL: optimizedUpload.fileURL,
+                    fileURL: uploadURL,
                     model: parameters.transcriptionModel,
                     language: parameters.transcriptionLanguage,
                     prompt: prompt
@@ -795,6 +835,17 @@ final class DictationController {
             } catch {
                 guard Self.isEmptyTranscription(error) else {
                     throw error
+                }
+
+                if uploadURL.standardizedFileURL
+                    != audioURL.standardizedFileURL,
+                   !retriedWithOriginalAudio {
+                    retriedWithOriginalAudio = true
+                    uploadURL = audioURL
+                    LocalFlowLogger.log(
+                        "Optimized audio returned empty transcription; retrying original recording id=\(job.id)"
+                    )
+                    continue
                 }
 
                 let responseCount = (
@@ -1009,6 +1060,9 @@ final class DictationController {
         LocalFlowLogger.log(
             "Processing deferred for retry error=\(error.localizedDescription)"
         )
+        if let guidance = Self.setupGuidance(for: error) {
+            onSetupRequired?(guidance)
+        }
         setStatus(
             .error(
                 "\(error.localizedDescription) The dictation was saved for retry."
@@ -1074,11 +1128,48 @@ final class DictationController {
 
     private static let maximumEmptyTranscriptionResponses = 3
 
+    static func setupGuidance(for error: Error) -> String? {
+        guard let error = error as? OpenAIClientError else {
+            return nil
+        }
+        switch error {
+        case .missingAPIKey:
+            return "Add a valid OpenAI API key in LocalFlow Settings."
+        case .badStatus(401, _):
+            return "OpenAI rejected this API key. Replace it in LocalFlow Settings."
+        case .badStatus(403, _):
+            return "This API key cannot access the configured OpenAI model. Check the key and model in Settings."
+        case .badStatus(404, _):
+            return "The configured OpenAI model is unavailable for this account. Choose an available model in Settings."
+        default:
+            return nil
+        }
+    }
+
     private func refreshRecordingStatus() {
         guard audioRecorder.isRecording, let recordingStartedAt else {
             return
         }
         let duration = Date().timeIntervalSince(recordingStartedAt)
+        if configuration.enableDoubleClapControl {
+            let detectionReceived = audioRecorder
+                .consumeDoubleClapDetection()
+            if DoubleClapRecordingStopPolicy.shouldStop(
+                detectionReceived: detectionReceived,
+                recordingDuration: duration
+            ) {
+                LocalFlowLogger.log(
+                    "Double-clap control requested recording finish"
+                )
+                requestRecordingStop()
+                return
+            }
+            if detectionReceived {
+                LocalFlowLogger.log(
+                    "Double-clap startup echo ignored duration=\(String(format: "%.2f", duration))"
+                )
+            }
+        }
         let recordingStatus = AppStatus.recording(duration, recordingMode)
         status = recordingStatus
         onRecordingFrame?(

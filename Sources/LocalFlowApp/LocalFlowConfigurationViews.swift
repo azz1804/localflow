@@ -257,6 +257,19 @@ struct LocalFlowSettingsView: View {
                         .toggleStyle(.switch)
                         .labelsHidden()
                     }
+
+                    HubSettingRow(
+                        label: "Double-clap control",
+                        help: "Two hand claps start or finish a hands-free dictation. LocalFlow listens with the Mac microphone while idle, so macOS shows its microphone privacy indicator."
+                    ) {
+                        Toggle(
+                            "",
+                            isOn: $model.configuration
+                                .enableDoubleClapControl
+                        )
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                    }
                 }
 
                 HubSettingsSection(

@@ -8,6 +8,18 @@ final class OpenAIClientTests: XCTestCase {
         super.tearDown()
     }
 
+    func testAPIErrorDescriptionExtractsReadableMessage() {
+        let error = OpenAIClientError.badStatus(
+            401,
+            #"{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}"#
+        )
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            "OpenAI request failed (HTTP 401): Incorrect API key provided"
+        )
+    }
+
     func testPromptModeUsesResponsesAPILowLatencyPayload() async throws {
         let script = ResponseScript([
             .http(

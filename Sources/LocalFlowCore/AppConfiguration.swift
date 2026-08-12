@@ -26,6 +26,7 @@ public struct AppConfiguration: Equatable, Sendable {
     public var pasteRestoreDelayMilliseconds: Int
     public var orbThemeOverride: String
     public var preferBuiltInMicrophoneForBluetooth: Bool
+    public var enableDoubleClapControl: Bool
 
     public var outputMode: DictationOutputMode {
         get {
@@ -66,7 +67,8 @@ public struct AppConfiguration: Equatable, Sendable {
         restoreClipboardAfterPaste: Bool = true,
         pasteRestoreDelayMilliseconds: Int = 900,
         orbThemeOverride: String = "automatic",
-        preferBuiltInMicrophoneForBluetooth: Bool = true
+        preferBuiltInMicrophoneForBluetooth: Bool = true,
+        enableDoubleClapControl: Bool = false
     ) {
         self.openAIAPIKey = openAIAPIKey
         self.transcriptionModel = transcriptionModel
@@ -86,6 +88,7 @@ public struct AppConfiguration: Equatable, Sendable {
         self.pasteRestoreDelayMilliseconds = pasteRestoreDelayMilliseconds
         self.orbThemeOverride = orbThemeOverride
         self.preferBuiltInMicrophoneForBluetooth = preferBuiltInMicrophoneForBluetooth
+        self.enableDoubleClapControl = enableDoubleClapControl
     }
 
     public init(env: [String: String]) {
@@ -114,6 +117,10 @@ public struct AppConfiguration: Equatable, Sendable {
             preferBuiltInMicrophoneForBluetooth: Self.boolValue(
                 env["PREFER_BUILT_IN_MIC_FOR_BLUETOOTH"],
                 default: true
+            ),
+            enableDoubleClapControl: Self.boolValue(
+                env["ENABLE_DOUBLE_CLAP_CONTROL"],
+                default: false
             )
         )
     }
@@ -138,6 +145,10 @@ public struct AppConfiguration: Equatable, Sendable {
             (
                 "PREFER_BUILT_IN_MIC_FOR_BLUETOOTH",
                 preferBuiltInMicrophoneForBluetooth ? "true" : "false"
+            ),
+            (
+                "ENABLE_DOUBLE_CLAP_CONTROL",
+                enableDoubleClapControl ? "true" : "false"
             )
         ]
 
