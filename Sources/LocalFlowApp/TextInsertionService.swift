@@ -31,6 +31,7 @@ enum KeyboardPasteConfirmation: Equatable {
     case unavailable
     case focusChanged
     case deltaMismatch
+    case noChange
 }
 
 struct KeyboardPasteResolution: Equatable {
@@ -196,11 +197,25 @@ final class TextInsertionService {
             confirmation: confirmation,
             attemptCount: attemptCount
         ) {
+            guard !Task.isCancelled else {
+                break
+            }
+            let retryTarget = focusedTextTarget()
+            guard Self.shouldPaste(
+                accessibilityTrusted: isAccessibilityTrusted,
+                currentState: retryTarget.state,
+                capturedTarget: target,
+                currentProcessIdentifier: NSWorkspace.shared.frontmostApplication?.processIdentifier
+            ) else {
+                LocalFlowLogger.log("Keyboard paste retry skipped after focus changed")
+                break
+            }
             attemptCount += 1
             LocalFlowLogger.log("Keyboard paste retry attempt=\(attemptCount)")
             do {
                 try await sendPasteKeystroke(to: destination)
             } catch {
+                LocalFlowLogger.log("Keyboard paste retry failed error=\(error.localizedDescription)")
                 break
             }
             confirmation = await confirmKeyboardPaste(
@@ -223,7 +238,7 @@ final class TextInsertionService {
             LocalFlowLogger.log(
                 "Keyboard paste posted to captured process; Accessibility confirmation unavailable; transcript retained on clipboard"
             )
-        case .unavailable, .focusChanged, .deltaMismatch:
+        case .unavailable, .focusChanged, .deltaMismatch, .noChange:
             LocalFlowLogger.log(
                 "Keyboard paste unconfirmed reason=\(String(describing: confirmation)) attempts=\(attemptCount); transcript retained on clipboard"
             )
@@ -376,9 +391,13 @@ final class TextInsertionService {
         guard let expectedCharacterDelta, let actualCharacterDelta else {
             return .unavailable
         }
-        return expectedCharacterDelta == actualCharacterDelta
-            ? .confirmed
-            : .deltaMismatch
+        if actualCharacterDelta == expectedCharacterDelta {
+            return .confirmed
+        }
+        if actualCharacterDelta == 0 {
+            return .noChange
+        }
+        return .deltaMismatch
     }
 
     nonisolated static func keyboardPasteResolution(
@@ -404,7 +423,7 @@ final class TextInsertionService {
                     shouldRestoreClipboard: false
                 )
             }
-        case .focusChanged, .deltaMismatch:
+        case .focusChanged, .deltaMismatch, .noChange:
             return KeyboardPasteResolution(
                 outcome: .copiedToClipboard,
                 shouldRestoreClipboard: false
@@ -412,15 +431,17 @@ final class TextInsertionService {
         }
     }
 
-    // A delta mismatch with unchanged focus means the keystroke observably
-    // did not land, so one more attempt cannot double-paste. A focus change
-    // makes redelivery unsafe, and unavailable metrics could hide a paste
-    // that already landed.
+    // Only a confirmed no-change (character count unchanged, focus intact) is
+    // safe to retry: the keystroke observably did not land, so one more
+    // attempt cannot double-paste. A nonzero unexpected delta means some text
+    // may have landed already, so retrying that case risks double-pasting. A
+    // focus change makes redelivery unsafe, and unavailable metrics could
+    // hide a paste that already landed.
     nonisolated static func shouldRetryKeyboardPaste(
         confirmation: KeyboardPasteConfirmation,
         attemptCount: Int
     ) -> Bool {
-        confirmation == .deltaMismatch && attemptCount < 2
+        confirmation == .noChange && attemptCount < 2
     }
 
     // Chromium regenerates AX wrapper objects for the same DOM node, so
@@ -619,8 +640,11 @@ final class TextInsertionService {
     ) -> Bool {
         switch (captured, current) {
         case let (.some(captured), .some(current)):
+            if CFEqual(captured, current) {
+                return true
+            }
             return Self.focusIdentityMatches(
-                identityEqual: CFEqual(captured, current),
+                identityEqual: false,
                 capturedPid: processIdentifier(of: captured),
                 currentPid: processIdentifier(of: current),
                 capturedRole: role(of: captured),
@@ -634,11 +658,11 @@ final class TextInsertionService {
     }
 
     private func processIdentifier(of element: AXUIElement) -> pid_t? {
-        var processIdentifier: pid_t = 0
-        guard AXUIElementGetPid(element, &processIdentifier) == .success else {
+        var elementPid: pid_t = 0
+        guard AXUIElementGetPid(element, &elementPid) == .success else {
             return nil
         }
-        return processIdentifier
+        return elementPid
     }
 
     private func role(of element: AXUIElement) -> String? {
@@ -695,6 +719,9 @@ final class TextInsertionService {
         var confirmation: KeyboardPasteConfirmation = .unavailable
         repeat {
             try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else {
+                return confirmation
+            }
             let focusedAfterPaste = focusedTextTarget()
             let focusStillMatches = focusMatches(
                 captured: deliveryElement,

@@ -209,14 +209,25 @@ final class TextInsertionServiceTests: XCTestCase {
         )
     }
 
-    func testDifferentMetricsAreDeltaMismatch() {
+    func testDifferentNonzeroMetricsAreDeltaMismatch() {
+        XCTAssertEqual(
+            TextInsertionService.keyboardPasteConfirmation(
+                focusStillMatches: true,
+                expectedCharacterDelta: 12,
+                actualCharacterDelta: 5
+            ),
+            .deltaMismatch
+        )
+    }
+
+    func testZeroActualDeltaWithFocusIntactIsNoChange() {
         XCTAssertEqual(
             TextInsertionService.keyboardPasteConfirmation(
                 focusStillMatches: true,
                 expectedCharacterDelta: 12,
                 actualCharacterDelta: 0
             ),
-            .deltaMismatch
+            .noChange
         )
     }
 
@@ -281,23 +292,33 @@ final class TextInsertionServiceTests: XCTestCase {
         XCTAssertFalse(resolution.shouldRestoreClipboard)
     }
 
-    func testDeltaMismatchRetriesOnce() {
+    func testNoChangeKeepsTranscriptOnClipboardWithoutRestore() {
+        let resolution = TextInsertionService.keyboardPasteResolution(
+            destination: .capturedProcess(42),
+            confirmation: .noChange
+        )
+
+        XCTAssertEqual(resolution.outcome, .copiedToClipboard)
+        XCTAssertFalse(resolution.shouldRestoreClipboard)
+    }
+
+    func testNoChangeRetriesOnce() {
         XCTAssertTrue(
             TextInsertionService.shouldRetryKeyboardPaste(
-                confirmation: .deltaMismatch,
+                confirmation: .noChange,
                 attemptCount: 1
             )
         )
         XCTAssertFalse(
             TextInsertionService.shouldRetryKeyboardPaste(
-                confirmation: .deltaMismatch,
+                confirmation: .noChange,
                 attemptCount: 2
             )
         )
     }
 
     func testFocusChangeAndUnavailableAndConfirmedNeverRetry() {
-        for confirmation: KeyboardPasteConfirmation in [.focusChanged, .unavailable, .confirmed] {
+        for confirmation: KeyboardPasteConfirmation in [.focusChanged, .unavailable, .confirmed, .deltaMismatch] {
             XCTAssertFalse(
                 TextInsertionService.shouldRetryKeyboardPaste(
                     confirmation: confirmation,
