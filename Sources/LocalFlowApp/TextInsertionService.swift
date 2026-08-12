@@ -186,28 +186,29 @@ final class TextInsertionService {
         // PID-targeted event was posted. That is unavailable evidence, not a
         // failed delivery, so retain the transcript without falsely reporting
         // that it was only copied.
-        try? await Task.sleep(for: .milliseconds(100))
-        let focusedAfterPaste = focusedTextTarget()
-        let focusStillMatches = focusMatches(
-            captured: deliveryTarget.element,
-            current: focusedAfterPaste.element
+        var attemptCount = 1
+        var confirmation = await confirmKeyboardPaste(
+            deliveryElement: deliveryTarget.element,
+            metricsBeforePaste: metricsBeforePaste,
+            text: text
         )
-        let metricsAfterPaste = textMetrics(for: focusedAfterPaste.element)
-        let expectedCharacterDelta = metricsBeforePaste.map {
-            text.utf16.count - $0.selectedCharacterCount
+        while Self.shouldRetryKeyboardPaste(
+            confirmation: confirmation,
+            attemptCount: attemptCount
+        ) {
+            attemptCount += 1
+            LocalFlowLogger.log("Keyboard paste retry attempt=\(attemptCount)")
+            do {
+                try await sendPasteKeystroke(to: destination)
+            } catch {
+                break
+            }
+            confirmation = await confirmKeyboardPaste(
+                deliveryElement: deliveryTarget.element,
+                metricsBeforePaste: metricsBeforePaste,
+                text: text
+            )
         }
-        let actualCharacterDelta: Int?
-        if let metricsBeforePaste, let metricsAfterPaste {
-            actualCharacterDelta = metricsAfterPaste.characterCount
-                - metricsBeforePaste.characterCount
-        } else {
-            actualCharacterDelta = nil
-        }
-        let confirmation = Self.keyboardPasteConfirmation(
-            focusStillMatches: focusStillMatches,
-            expectedCharacterDelta: expectedCharacterDelta,
-            actualCharacterDelta: actualCharacterDelta
-        )
         let resolution = Self.keyboardPasteResolution(
             destination: destination,
             confirmation: confirmation
@@ -215,14 +216,16 @@ final class TextInsertionService {
 
         switch confirmation {
         case .confirmed:
-            LocalFlowLogger.log("Keyboard paste confirmed via Accessibility metrics")
+            LocalFlowLogger.log(
+                "Keyboard paste confirmed via Accessibility metrics attempts=\(attemptCount)"
+            )
         case .unavailable where resolution.outcome == .pasted:
             LocalFlowLogger.log(
                 "Keyboard paste posted to captured process; Accessibility confirmation unavailable; transcript retained on clipboard"
             )
         case .unavailable, .focusChanged, .deltaMismatch:
             LocalFlowLogger.log(
-                "Keyboard paste unconfirmed; transcript retained on clipboard"
+                "Keyboard paste unconfirmed reason=\(String(describing: confirmation)) attempts=\(attemptCount); transcript retained on clipboard"
             )
         }
 
@@ -628,6 +631,47 @@ final class TextInsertionService {
             characterCount: characterCount,
             selectedCharacterCount: selectedCount
         )
+    }
+
+    private func confirmKeyboardPaste(
+        deliveryElement: AXUIElement?,
+        metricsBeforePaste: TextMetrics?,
+        text: String
+    ) async -> KeyboardPasteConfirmation {
+        // Electron editors regularly need several hundred milliseconds to
+        // process a synthetic Cmd-V; a single early check misreads slow
+        // delivery as failure. Without baseline metrics no amount of polling
+        // can produce evidence, so a single focus check suffices.
+        let deadline = ContinuousClock.now.advanced(by: .milliseconds(1_000))
+        var confirmation: KeyboardPasteConfirmation = .unavailable
+        repeat {
+            try? await Task.sleep(for: .milliseconds(100))
+            let focusedAfterPaste = focusedTextTarget()
+            let focusStillMatches = focusMatches(
+                captured: deliveryElement,
+                current: focusedAfterPaste.element
+            )
+            let metricsAfterPaste = textMetrics(for: focusedAfterPaste.element)
+            let expectedCharacterDelta = metricsBeforePaste.map {
+                text.utf16.count - $0.selectedCharacterCount
+            }
+            let actualCharacterDelta: Int?
+            if let metricsBeforePaste, let metricsAfterPaste {
+                actualCharacterDelta = metricsAfterPaste.characterCount
+                    - metricsBeforePaste.characterCount
+            } else {
+                actualCharacterDelta = nil
+            }
+            confirmation = Self.keyboardPasteConfirmation(
+                focusStillMatches: focusStillMatches,
+                expectedCharacterDelta: expectedCharacterDelta,
+                actualCharacterDelta: actualCharacterDelta
+            )
+            if confirmation == .confirmed || metricsBeforePaste == nil {
+                return confirmation
+            }
+        } while ContinuousClock.now < deadline
+        return confirmation
     }
 
     private func restore(_ snapshot: ClipboardSnapshot, to pasteboard: NSPasteboard) {
