@@ -14,8 +14,9 @@ VERSION="${LOCALFLOW_VERSION:-0.3.0}"
 BUILD_NUMBER="${LOCALFLOW_BUILD_NUMBER:-3}"
 GIT_COMMIT="${LOCALFLOW_GIT_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
 
-if ! git -C "$ROOT_DIR" diff --quiet --ignore-submodules -- 2>/dev/null; then
-  GIT_COMMIT="${GIT_COMMIT}-dirty"
+if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    && ! git -C "$ROOT_DIR" diff --quiet --ignore-submodules -- 2>/dev/null; then
+  GIT_COMMIT="${GIT_COMMIT%-dirty}-dirty"
 fi
 
 cd "$ROOT_DIR"

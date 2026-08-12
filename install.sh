@@ -9,6 +9,7 @@ SKIP_API_KEY="${LOCALFLOW_SKIP_API_KEY:-0}"
 RESET_API_KEY="${LOCALFLOW_RESET_API_KEY:-0}"
 EXPECTED_SHA256="${LOCALFLOW_SHA256:-}"
 TEMP_DIR=""
+RESOLVED_REF="${LOCALFLOW_GIT_COMMIT:-}"
 
 info() {
   printf '\n\033[1;35mLocalFlow\033[0m  %s\n' "$1"
@@ -66,6 +67,9 @@ if [[ -z "$SOURCE_DIR" ]]; then
   tar -xzf "$ARCHIVE_PATH" -C "$SOURCE_DIR" --strip-components=1
 else
   SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
+  if [[ -z "$RESOLVED_REF" ]]; then
+    RESOLVED_REF="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  fi
   info "Using local source at $SOURCE_DIR"
 fi
 
@@ -141,6 +145,7 @@ elif [[ "$SKIP_API_KEY" != "1" ]] && has_interactive_terminal; then
 fi
 
 info "Building and installing LocalFlow…"
+LOCALFLOW_GIT_COMMIT="$RESOLVED_REF" \
 LOCALFLOW_SKIP_LAUNCH="${LOCALFLOW_SKIP_LAUNCH:-0}" \
   "$SOURCE_DIR/Scripts/install_app.sh" "$DEST_DIR" >/dev/null
 

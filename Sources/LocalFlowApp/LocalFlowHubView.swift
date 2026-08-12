@@ -14,16 +14,29 @@ struct LocalFlowHubView: View {
                     HubPalette.canvas
                         .ignoresSafeArea()
 
-                    selectedPage
-                        .id(model.selectedSection)
-                        .transition(
-                            reduceMotion
-                                ? .identity
-                                : .asymmetric(
-                                    insertion: .opacity.combined(with: .move(edge: .trailing)),
-                                    removal: .opacity
+                    VStack(spacing: 0) {
+                        if model.updatePresentation != .hidden {
+                            HubUpdateBanner(model: model)
+                                .padding(.horizontal, 30)
+                                .padding(.top, 18)
+                                .transition(
+                                    reduceMotion
+                                        ? .opacity
+                                        : .move(edge: .top).combined(with: .opacity)
                                 )
-                        )
+                        }
+
+                        selectedPage
+                            .id(model.selectedSection)
+                            .transition(
+                                reduceMotion
+                                    ? .identity
+                                    : .asymmetric(
+                                        insertion: .opacity.combined(with: .move(edge: .trailing)),
+                                        removal: .opacity
+                                    )
+                            )
+                    }
                 }
             }
 
@@ -43,6 +56,10 @@ struct LocalFlowHubView: View {
             value: model.selectedSection
         )
         .animation(.easeOut(duration: 0.2), value: model.statusMessage)
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.88),
+            value: model.updatePresentation
+        )
     }
 
     @ViewBuilder
@@ -61,6 +78,130 @@ struct LocalFlowHubView: View {
         case .diagnostics:
             LocalFlowDiagnosticsView(model: model)
         }
+    }
+}
+
+private struct HubUpdateBanner: View {
+    @ObservedObject var model: LocalFlowHubModel
+
+    private var update: LocalFlowAvailableUpdate? {
+        model.updatePresentation.update
+    }
+
+    private var isInstalling: Bool {
+        if case .installing = model.updatePresentation {
+            return true
+        }
+        return false
+    }
+
+    private var failureMessage: String? {
+        if case let .failed(_, message) = model.updatePresentation {
+            return message
+        }
+        return nil
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                HubPalette.purple.opacity(0.2),
+                                HubPalette.blue.opacity(0.12)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Image(
+                    systemName: failureMessage == nil
+                        ? "arrow.down.circle.fill"
+                        : "exclamationmark.triangle.fill"
+                )
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(
+                    failureMessage == nil ? HubPalette.purple : Color.orange
+                )
+            }
+            .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(
+                    isInstalling
+                        ? "Mise à jour en cours…"
+                        : failureMessage == nil
+                            ? "Une mise à jour est disponible"
+                            : "La mise à jour doit être relancée"
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+
+                Text(
+                    failureMessage
+                        ?? (isInstalling
+                            ? "LocalFlow va se relancer automatiquement."
+                            : "Appuyez sur « Mise à jour » pour appliquer les dernières améliorations.")
+                )
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            }
+
+            Spacer(minLength: 14)
+
+            if let update {
+                Text(update.shortCommit)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .frame(height: 25)
+                    .background(HubPalette.softFill)
+                    .clipShape(Capsule())
+                    .accessibilityLabel("Version \(update.shortCommit)")
+            }
+
+            if isInstalling {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 36, height: 36)
+                    .accessibilityLabel("Mise à jour en cours")
+            } else {
+                Button {
+                    model.installAvailableUpdate()
+                } label: {
+                    Label(
+                        failureMessage == nil ? "Mise à jour" : "Réessayer",
+                        systemImage: "arrow.down"
+                    )
+                }
+                .buttonStyle(HubPrimaryButtonStyle())
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 66)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(HubPalette.card)
+                .shadow(color: .black.opacity(0.07), radius: 16, y: 6)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            HubPalette.purple.opacity(0.38),
+                            HubPalette.blue.opacity(0.14)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

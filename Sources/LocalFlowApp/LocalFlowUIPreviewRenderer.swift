@@ -46,6 +46,20 @@ enum LocalFlowUIPreviewRenderer {
             colorScheme: .dark,
             to: outputDirectory.appendingPathComponent("localflow-home.png")
         )
+        let updateModel = makeModel()
+        updateModel.updatePresentation = .available(
+            LocalFlowAvailableUpdate(
+                commit: "aed4c9fec77e5c12ffd6f3773420de0d9747403f"
+            )
+        )
+        try renderHub(
+            model: updateModel,
+            section: .home,
+            colorScheme: .dark,
+            to: outputDirectory.appendingPathComponent(
+                "localflow-update-available.png"
+            )
+        )
         for theme in OrbEvolution.themes {
             let themedModel = makeModel()
             themedModel.configuration.orbThemeOverride = theme.id

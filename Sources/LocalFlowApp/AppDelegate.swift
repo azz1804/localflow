@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionRetryBaseline: (accessibility: Bool, inputMonitoring: Bool)?
     private var hotkeyRestartCoordinator = HotkeyRestartCoordinator()
     private var terminationPreparationIsInFlight = false
+    private let updateService = LocalFlowUpdateService()
+    private var updatePresentation: LocalFlowUpdatePresentation = .hidden
+    private var updateMonitoringTask: Task<Void, Never>?
+    private var updateInstallationTask: Task<Void, Never>?
+    private var updateProcess: Process?
+    private var updateLogHandle: FileHandle?
 
     private let startStopMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleManualRecording), keyEquivalent: "")
     private let mailModeMenuItem = NSMenuItem(title: "Mail Mode", action: #selector(toggleMailMode), keyEquivalent: "")
@@ -51,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let lastHotkeyMenuItem = NSMenuItem(title: "Last hotkey: none", action: nil, keyEquivalent: "")
     private let accessibilityMenuItem = NSMenuItem(title: "Request Accessibility Permission", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
     private let inputMonitoringMenuItem = NSMenuItem(title: "Request Input Monitoring Permission", action: #selector(requestInputMonitoringPermission), keyEquivalent: "")
+    private let updateMenuItem = NSMenuItem(
+        title: "Mise à jour disponible…",
+        action: #selector(showUpdateNotice),
+        keyEquivalent: ""
+    )
 
     nonisolated func applicationDidFinishLaunching(
         _ notification: Notification
@@ -78,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             configureLaunchAtLogin()
             setupControllers()
             refreshPermissionMenuState()
+            startUpdateMonitoring()
             let activationRequested = LocalFlowActivationSignal
                 .consumeDashboardRequest()
             if activationRequested || AppLaunchPresentationPolicy
@@ -109,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         accessibilityRetryTimer?.invalidate()
+        updateMonitoringTask?.cancel()
+        updateInstallationTask?.cancel()
         doubleClapController?.stop()
         hotkeyController?.stop()
         LocalFlowLogger.flush()
@@ -420,6 +434,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyItem.target = self
         menu.addItem(historyItem)
 
+        updateMenuItem.image = NSImage(
+            systemSymbolName: "arrow.down.circle.fill",
+            accessibilityDescription: "Mise à jour disponible"
+        )
+        updateMenuItem.target = self
+        updateMenuItem.isHidden = true
+        menu.addItem(updateMenuItem)
+
         menu.addItem(.separator())
 
         startStopMenuItem.target = self
@@ -677,6 +699,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         presentMainWindow(selectHistory: false, selectHome: true)
     }
 
+    @objc nonisolated private func showUpdateNotice() {
+        AppKitMainThreadBridge.run {
+            showUpdateNoticeOnMainActor()
+        }
+    }
+
+    private func showUpdateNoticeOnMainActor() {
+        presentMainWindow(selectHistory: false, selectHome: true)
+        settingsWindowController?.updateUpdatePresentation(updatePresentation)
+    }
+
     @objc nonisolated private func showDashboardFromActivationSignal(
         _ notification: Notification
     ) {
@@ -710,6 +743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appSupportURL: appSupportURL,
             diagnosticInfo: makeDiagnosticInfo()
         )
+        settingsWindowController.updateUpdatePresentation(updatePresentation)
         if selectHome {
             settingsWindowController.selectHomeTab()
         } else if selectHistory {
@@ -1057,6 +1091,192 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.retryHotkeys()
             self?.presentMainWindow(selectHistory: false)
         }
+
+        controller.onInstallUpdate = { [weak self] update in
+            self?.installUpdate(update)
+        }
+    }
+
+    private func startUpdateMonitoring() {
+        updateMonitoringTask?.cancel()
+        updateMonitoringTask = Task { @MainActor [weak self] in
+            // Keep startup focused on recording and permissions, then check in
+            // the background. Six checks per hour remains well below GitHub's
+            // anonymous API allowance for a public repository.
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            while !Task.isCancelled {
+                await self?.checkForUpdate()
+                try? await Task.sleep(nanoseconds: 600_000_000_000)
+            }
+        }
+    }
+
+    private func checkForUpdate() async {
+        guard case .hidden = updatePresentation else {
+            return
+        }
+
+        let installedCommit = Bundle.main.object(
+            forInfoDictionaryKey: "LocalFlowGitCommit"
+        ) as? String ?? "unknown"
+        do {
+            if let update = try await updateService.availableUpdate(
+                installedCommit: installedCommit
+            ) {
+                LocalFlowLogger.log(
+                    "Update available installed=\(installedCommit) latest=\(update.commit)"
+                )
+                applyUpdatePresentation(.available(update))
+            }
+        } catch {
+            // A background connectivity failure must never interrupt dictation.
+            // The next periodic check retries automatically.
+            LocalFlowLogger.log(
+                "Update check deferred error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func applyUpdatePresentation(
+        _ presentation: LocalFlowUpdatePresentation
+    ) {
+        updatePresentation = presentation
+        settingsWindowController?.updateUpdatePresentation(presentation)
+
+        switch presentation {
+        case .hidden:
+            updateMenuItem.isHidden = true
+            updateMenuItem.isEnabled = true
+            statusItem?.button?.toolTip = "LocalFlow"
+        case .available:
+            updateMenuItem.title = "Mise à jour disponible…"
+            updateMenuItem.isHidden = false
+            updateMenuItem.isEnabled = true
+            statusItem?.button?.toolTip = "LocalFlow — mise à jour disponible"
+        case .installing:
+            updateMenuItem.title = "Mise à jour en cours…"
+            updateMenuItem.isHidden = false
+            updateMenuItem.isEnabled = false
+            statusItem?.button?.toolTip = "LocalFlow — mise à jour en cours"
+        case .failed:
+            updateMenuItem.title = "Relancer la mise à jour…"
+            updateMenuItem.isHidden = false
+            updateMenuItem.isEnabled = true
+            statusItem?.button?.toolTip = "LocalFlow — mise à jour à relancer"
+        }
+    }
+
+    private func installUpdate(_ update: LocalFlowAvailableUpdate) {
+        guard updateProcess == nil, updateInstallationTask == nil else {
+            return
+        }
+        applyUpdatePresentation(.installing(update))
+
+        updateInstallationTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            do {
+                let updateDirectory = appSupportURL.appendingPathComponent(
+                    "updates",
+                    isDirectory: true
+                )
+                let installerURL = try await updateService.downloadInstaller(
+                    for: update,
+                    destinationDirectory: updateDirectory
+                )
+                guard !Task.isCancelled else {
+                    return
+                }
+                updateInstallationTask = nil
+                try launchUpdateInstaller(installerURL, update: update)
+            } catch {
+                updateInstallationTask = nil
+                LocalFlowLogger.log(
+                    "Update preparation failed error=\(error.localizedDescription)"
+                )
+                applyUpdatePresentation(
+                    .failed(update, message: error.localizedDescription)
+                )
+            }
+        }
+    }
+
+    private func launchUpdateInstaller(
+        _ installerURL: URL,
+        update: LocalFlowAvailableUpdate
+    ) throws {
+        let logURL = appSupportURL.appendingPathComponent("update.log")
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            guard FileManager.default.createFile(
+                atPath: logURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            ) else {
+                throw LocalFlowUpdateError.launchFailed
+            }
+        }
+        let logHandle = try FileHandle(forWritingTo: logURL)
+        try logHandle.seekToEnd()
+        try logHandle.write(
+            contentsOf: Data(
+                "\nLocalFlow update \(update.commit) started \(Date())\n".utf8
+            )
+        )
+
+        let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent()
+        let destinationDirectory = Bundle.main.bundleURL.pathExtension == "app"
+            ? bundleParent
+            : URL(fileURLWithPath: "/Applications", isDirectory: true)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [installerURL.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["LOCALFLOW_REPOSITORY"] = updateService.repository
+        environment["LOCALFLOW_REF"] = update.commit
+        environment["LOCALFLOW_GIT_COMMIT"] = update.commit
+        environment["LOCALFLOW_SKIP_API_KEY"] = "1"
+        environment["LOCALFLOW_DEST_DIR"] = destinationDirectory.path
+        process.environment = environment
+        process.standardOutput = logHandle
+        process.standardError = logHandle
+        process.terminationHandler = { [weak self] finishedProcess in
+            let status = finishedProcess.terminationStatus
+            Task { @MainActor [weak self] in
+                self?.updateInstallerDidTerminate(status: status, update: update)
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            try? logHandle.close()
+            throw LocalFlowUpdateError.launchFailed
+        }
+        updateLogHandle = logHandle
+        updateProcess = process
+        LocalFlowLogger.log(
+            "Update installer launched commit=\(update.commit) destination=\(destinationDirectory.path)"
+        )
+    }
+
+    private func updateInstallerDidTerminate(
+        status: Int32,
+        update: LocalFlowAvailableUpdate
+    ) {
+        try? updateLogHandle?.close()
+        updateLogHandle = nil
+        updateProcess = nil
+
+        guard status != 0 else {
+            // A successful installer replaces and relaunches the application;
+            // normally this process has already been asked to terminate.
+            return
+        }
+        let message = "Échec de l’installation (code \(status)). Consultez Diagnostics puis réessayez."
+        LocalFlowLogger.log(message)
+        applyUpdatePresentation(.failed(update, message: message))
     }
 
     private func makeDiagnosticInfo() -> LocalFlowDiagnosticInfo {

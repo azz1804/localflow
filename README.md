@@ -20,6 +20,7 @@ LocalFlow is a local macOS dictation app inspired by Wispr Flow. It records audi
 - Automatic paste into native and custom editors, including Electron-based apps, through a protected temporary clipboard.
 - Local text-only history with retention pruning.
 - Bounded retries for temporary network, rate-limit and OpenAI service errors.
+- Automatic update checks with an in-app “Mise à jour” action that preserves local settings, dictionary, and history.
 
 ## Install from source
 
@@ -136,6 +137,7 @@ Enable LocalFlow there too if `Fn` does nothing while the app is running. `Optio
 - Hotkey engine restarts are safely deferred while recording, so `Escape` and Fn release remain reliable.
 - While holding `Fn`, press `Space` to lock the current hold recording into toggle mode.
 - Use the menu bar icon for manual start/stop, Prompt Mode, Mail Mode, opening LocalFlow and quitting.
+- When a new version is published, open LocalFlow from the menu-bar orb and press `Mise à jour` in the persistent update banner. LocalFlow installs the exact detected version and relaunches automatically.
 - Switch directly between Raw mode, Prompt, and Mail from the Home dashboard or from the three-way control in the recording bar. The choice is saved automatically.
 - Double-click the recording bar to collapse it into an orb, double-click the orb to expand it, or drag either form anywhere on screen. The expanded bar automatically becomes vertical when placed near the left or right edge.
 - Enable `Prompt Mode` to remove speech artifacts and clarify the goal, context, constraints, and expected output without answering or inventing details. Detailed dictations retain their full context, first-person voice, emotional intensity, and stated rationale.
@@ -193,6 +195,7 @@ Files:
 - `dictionary.json` for terms and replacement rules.
 - `history.jsonl` for text-only dictation history.
 - `localflow.log` for diagnostics.
+- `update.log` for the latest in-app installation attempt.
 
 Audio files are temporary and removed after processing.
 
@@ -220,7 +223,7 @@ Manual smoke test:
 
 ## Verification performed during development
 
-- `swift test`: 191 unit tests passing (2 optional paid API evaluations skipped by default).
+- `swift test`: 196 unit tests passing (2 optional paid API evaluations skipped by default).
 - `./Scripts/build_app.sh`: release `.app` bundle created.
 - `plutil -lint`: generated `Info.plist` is valid.
 - `codesign --verify --deep --strict`: ad-hoc signed bundle verifies.

@@ -121,6 +121,22 @@ final class LocalFlowHubModelTests: XCTestCase {
         XCTAssertTrue(model.statusIsError)
     }
 
+    @MainActor
+    func testUpdateButtonImmediatelyShowsProgressAndStartsInstaller() {
+        let model = LocalFlowHubModel()
+        let update = LocalFlowAvailableUpdate(
+            commit: "aed4c9fec77e5c12ffd6f3773420de0d9747403f"
+        )
+        var requestedUpdate: LocalFlowAvailableUpdate?
+        model.updatePresentation = .available(update)
+        model.installUpdateHandler = { requestedUpdate = $0 }
+
+        model.installAvailableUpdate()
+
+        XCTAssertEqual(model.updatePresentation, .installing(update))
+        XCTAssertEqual(requestedUpdate, update)
+    }
+
     private func record(text: String, app: String) -> DictationRecord {
         DictationRecord(
             targetApplication: TargetApplicationInfo(localizedName: app, bundleIdentifier: nil),

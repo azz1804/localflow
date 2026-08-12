@@ -83,6 +83,7 @@ final class LocalFlowHubModel: ObservableObject {
     @Published var diagnosticInfo: LocalFlowDiagnosticInfo?
     @Published var statusMessage = ""
     @Published var statusIsError = false
+    @Published var updatePresentation: LocalFlowUpdatePresentation = .hidden
 
     var saveSettingsHandler: ((AppConfiguration) -> Result<Void, Error>)?
     var outputModeChangeHandler: ((DictationOutputMode) -> Result<Void, Error>)?
@@ -94,6 +95,7 @@ final class LocalFlowHubModel: ObservableObject {
     var openSupportFolderHandler: (() -> Void)?
     var openDiagnosticLogHandler: (() -> Void)?
     var retryHotkeysHandler: (() -> Void)?
+    var installUpdateHandler: ((LocalFlowAvailableUpdate) -> Void)?
 
     private var statusTask: Task<Void, Never>?
 
@@ -263,6 +265,14 @@ final class LocalFlowHubModel: ObservableObject {
         showStatus("Input Monitoring request opened")
     }
 
+    func installAvailableUpdate() {
+        guard let update = updatePresentation.update else {
+            return
+        }
+        updatePresentation = .installing(update)
+        installUpdateHandler?(update)
+    }
+
     func showStatus(_ message: String, isError: Bool = false) {
         statusTask?.cancel()
         statusMessage = message
@@ -317,6 +327,7 @@ final class SettingsWindowController: NSWindowController {
     var onOpenSupportFolder: (() -> Void)?
     var onOpenDiagnosticLog: (() -> Void)?
     var onRetryHotkeys: (() -> Void)?
+    var onInstallUpdate: ((LocalFlowAvailableUpdate) -> Void)?
     var onWindowClosed: (() -> Void)?
 
     private let model: LocalFlowHubModel
@@ -401,6 +412,10 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
+    func updateUpdatePresentation(_ presentation: LocalFlowUpdatePresentation) {
+        model.updatePresentation = presentation
+    }
+
     private func configureModelActions() {
         model.saveSettingsHandler = { [weak self] configuration in
             self?.onSaveSettings?(configuration) ?? .success(())
@@ -431,6 +446,9 @@ final class SettingsWindowController: NSWindowController {
         }
         model.retryHotkeysHandler = { [weak self] in
             self?.onRetryHotkeys?()
+        }
+        model.installUpdateHandler = { [weak self] update in
+            self?.onInstallUpdate?(update)
         }
     }
 
