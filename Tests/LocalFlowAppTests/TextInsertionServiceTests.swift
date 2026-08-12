@@ -187,25 +187,36 @@ final class TextInsertionServiceTests: XCTestCase {
         )
     }
 
-    func testChangedFocusIsMismatchEvenWhenAccessibilityMetricsAreMissing() {
+    func testChangedFocusIsFocusChangedEvenWhenAccessibilityMetricsAreMissing() {
         XCTAssertEqual(
             TextInsertionService.keyboardPasteConfirmation(
                 focusStillMatches: false,
                 expectedCharacterDelta: nil,
                 actualCharacterDelta: nil
             ),
-            .mismatch
+            .focusChanged
         )
     }
 
-    func testChangedFocusMakesAvailableMetricsMismatch() {
+    func testChangedFocusMakesAvailableMetricsFocusChanged() {
         XCTAssertEqual(
             TextInsertionService.keyboardPasteConfirmation(
                 focusStillMatches: false,
                 expectedCharacterDelta: 12,
                 actualCharacterDelta: 12
             ),
-            .mismatch
+            .focusChanged
+        )
+    }
+
+    func testDifferentMetricsAreDeltaMismatch() {
+        XCTAssertEqual(
+            TextInsertionService.keyboardPasteConfirmation(
+                focusStillMatches: true,
+                expectedCharacterDelta: 12,
+                actualCharacterDelta: 0
+            ),
+            .deltaMismatch
         )
     }
 
@@ -250,13 +261,49 @@ final class TextInsertionServiceTests: XCTestCase {
         XCTAssertTrue(resolution.shouldRestoreClipboard)
     }
 
-    func testMismatchedMetricsKeepTranscriptOnClipboard() {
+    func testDeltaMismatchKeepsTranscriptOnClipboard() {
         let resolution = TextInsertionService.keyboardPasteResolution(
             destination: .capturedProcess(42),
-            confirmation: .mismatch
+            confirmation: .deltaMismatch
         )
 
         XCTAssertEqual(resolution.outcome, .copiedToClipboard)
         XCTAssertFalse(resolution.shouldRestoreClipboard)
+    }
+
+    func testFocusChangeKeepsTranscriptOnClipboard() {
+        let resolution = TextInsertionService.keyboardPasteResolution(
+            destination: .capturedProcess(42),
+            confirmation: .focusChanged
+        )
+
+        XCTAssertEqual(resolution.outcome, .copiedToClipboard)
+        XCTAssertFalse(resolution.shouldRestoreClipboard)
+    }
+
+    func testDeltaMismatchRetriesOnce() {
+        XCTAssertTrue(
+            TextInsertionService.shouldRetryKeyboardPaste(
+                confirmation: .deltaMismatch,
+                attemptCount: 1
+            )
+        )
+        XCTAssertFalse(
+            TextInsertionService.shouldRetryKeyboardPaste(
+                confirmation: .deltaMismatch,
+                attemptCount: 2
+            )
+        )
+    }
+
+    func testFocusChangeAndUnavailableAndConfirmedNeverRetry() {
+        for confirmation: KeyboardPasteConfirmation in [.focusChanged, .unavailable, .confirmed] {
+            XCTAssertFalse(
+                TextInsertionService.shouldRetryKeyboardPaste(
+                    confirmation: confirmation,
+                    attemptCount: 1
+                )
+            )
+        }
     }
 }

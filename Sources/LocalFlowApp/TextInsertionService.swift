@@ -29,7 +29,8 @@ enum KeyboardPasteDestination: Equatable {
 enum KeyboardPasteConfirmation: Equatable {
     case confirmed
     case unavailable
-    case mismatch
+    case focusChanged
+    case deltaMismatch
 }
 
 struct KeyboardPasteResolution: Equatable {
@@ -219,7 +220,7 @@ final class TextInsertionService {
             LocalFlowLogger.log(
                 "Keyboard paste posted to captured process; Accessibility confirmation unavailable; transcript retained on clipboard"
             )
-        case .unavailable, .mismatch:
+        case .unavailable, .focusChanged, .deltaMismatch:
             LocalFlowLogger.log(
                 "Keyboard paste unconfirmed; transcript retained on clipboard"
             )
@@ -367,14 +368,14 @@ final class TextInsertionService {
         actualCharacterDelta: Int?
     ) -> KeyboardPasteConfirmation {
         guard focusStillMatches else {
-            return .mismatch
+            return .focusChanged
         }
         guard let expectedCharacterDelta, let actualCharacterDelta else {
             return .unavailable
         }
         return expectedCharacterDelta == actualCharacterDelta
             ? .confirmed
-            : .mismatch
+            : .deltaMismatch
     }
 
     nonisolated static func keyboardPasteResolution(
@@ -400,12 +401,23 @@ final class TextInsertionService {
                     shouldRestoreClipboard: false
                 )
             }
-        case .mismatch:
+        case .focusChanged, .deltaMismatch:
             return KeyboardPasteResolution(
                 outcome: .copiedToClipboard,
                 shouldRestoreClipboard: false
             )
         }
+    }
+
+    // A delta mismatch with unchanged focus means the keystroke observably
+    // did not land, so one more attempt cannot double-paste. A focus change
+    // makes redelivery unsafe, and unavailable metrics could hide a paste
+    // that already landed.
+    nonisolated static func shouldRetryKeyboardPaste(
+        confirmation: KeyboardPasteConfirmation,
+        attemptCount: Int
+    ) -> Bool {
+        confirmation == .deltaMismatch && attemptCount < 2
     }
 
     nonisolated private static func capturedApplicationIsStillActive(
