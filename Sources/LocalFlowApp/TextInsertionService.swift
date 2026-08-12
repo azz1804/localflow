@@ -423,6 +423,29 @@ final class TextInsertionService {
         confirmation == .deltaMismatch && attemptCount < 2
     }
 
+    // Chromium regenerates AX wrapper objects for the same DOM node, so
+    // pointer inequality is not evidence that focus moved. Same process and
+    // same role is the strongest identity signal still available; missing
+    // metadata stays conservative and reports a mismatch.
+    nonisolated static func focusIdentityMatches(
+        identityEqual: Bool,
+        capturedPid: pid_t?,
+        currentPid: pid_t?,
+        capturedRole: String?,
+        currentRole: String?
+    ) -> Bool {
+        if identityEqual {
+            return true
+        }
+        guard let capturedPid, let currentPid, capturedPid == currentPid else {
+            return false
+        }
+        guard let capturedRole, let currentRole else {
+            return false
+        }
+        return capturedRole == currentRole
+    }
+
     nonisolated private static func capturedApplicationIsStillActive(
         _ target: TextInsertionTarget?,
         currentProcessIdentifier: pid_t?
@@ -596,12 +619,38 @@ final class TextInsertionService {
     ) -> Bool {
         switch (captured, current) {
         case let (.some(captured), .some(current)):
-            return CFEqual(captured, current)
+            return Self.focusIdentityMatches(
+                identityEqual: CFEqual(captured, current),
+                capturedPid: processIdentifier(of: captured),
+                currentPid: processIdentifier(of: current),
+                capturedRole: role(of: captured),
+                currentRole: role(of: current)
+            )
         case (nil, nil):
             return true
         default:
             return false
         }
+    }
+
+    private func processIdentifier(of element: AXUIElement) -> pid_t? {
+        var processIdentifier: pid_t = 0
+        guard AXUIElementGetPid(element, &processIdentifier) == .success else {
+            return nil
+        }
+        return processIdentifier
+    }
+
+    private func role(of element: AXUIElement) -> String? {
+        var roleValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXRoleAttribute as CFString,
+            &roleValue
+        ) == .success else {
+            return nil
+        }
+        return roleValue as? String
     }
 
     private func textMetrics(for element: AXUIElement?) -> TextMetrics? {

@@ -306,4 +306,73 @@ final class TextInsertionServiceTests: XCTestCase {
             )
         }
     }
+
+    func testIdenticalElementsMatchRegardlessOfMetadata() {
+        XCTAssertTrue(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: true,
+                capturedPid: nil,
+                currentPid: nil,
+                capturedRole: nil,
+                currentRole: nil
+            )
+        )
+    }
+
+    func testRegeneratedElementMatchesOnSamePidAndRole() {
+        XCTAssertTrue(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 42,
+                capturedRole: "AXTextArea",
+                currentRole: "AXTextArea"
+            )
+        )
+    }
+
+    func testDifferentProcessNeverMatches() {
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 84,
+                capturedRole: "AXTextArea",
+                currentRole: "AXTextArea"
+            )
+        )
+    }
+
+    func testDifferentRoleDoesNotMatch() {
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 42,
+                capturedRole: "AXTextArea",
+                currentRole: "AXButton"
+            )
+        )
+    }
+
+    func testMissingPidOrRoleDoesNotMatch() {
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: nil,
+                currentPid: nil,
+                capturedRole: "AXTextArea",
+                currentRole: "AXTextArea"
+            )
+        )
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 42,
+                capturedRole: nil,
+                currentRole: nil
+            )
+        )
+    }
 }
