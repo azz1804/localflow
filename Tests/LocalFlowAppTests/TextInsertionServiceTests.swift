@@ -187,25 +187,47 @@ final class TextInsertionServiceTests: XCTestCase {
         )
     }
 
-    func testChangedFocusIsMismatchEvenWhenAccessibilityMetricsAreMissing() {
+    func testChangedFocusIsFocusChangedEvenWhenAccessibilityMetricsAreMissing() {
         XCTAssertEqual(
             TextInsertionService.keyboardPasteConfirmation(
                 focusStillMatches: false,
                 expectedCharacterDelta: nil,
                 actualCharacterDelta: nil
             ),
-            .mismatch
+            .focusChanged
         )
     }
 
-    func testChangedFocusMakesAvailableMetricsMismatch() {
+    func testChangedFocusMakesAvailableMetricsFocusChanged() {
         XCTAssertEqual(
             TextInsertionService.keyboardPasteConfirmation(
                 focusStillMatches: false,
                 expectedCharacterDelta: 12,
                 actualCharacterDelta: 12
             ),
-            .mismatch
+            .focusChanged
+        )
+    }
+
+    func testDifferentNonzeroMetricsAreDeltaMismatch() {
+        XCTAssertEqual(
+            TextInsertionService.keyboardPasteConfirmation(
+                focusStillMatches: true,
+                expectedCharacterDelta: 12,
+                actualCharacterDelta: 5
+            ),
+            .deltaMismatch
+        )
+    }
+
+    func testZeroActualDeltaWithFocusIntactIsNoChange() {
+        XCTAssertEqual(
+            TextInsertionService.keyboardPasteConfirmation(
+                focusStillMatches: true,
+                expectedCharacterDelta: 12,
+                actualCharacterDelta: 0
+            ),
+            .noChange
         )
     }
 
@@ -250,13 +272,128 @@ final class TextInsertionServiceTests: XCTestCase {
         XCTAssertTrue(resolution.shouldRestoreClipboard)
     }
 
-    func testMismatchedMetricsKeepTranscriptOnClipboard() {
+    func testDeltaMismatchKeepsTranscriptOnClipboard() {
         let resolution = TextInsertionService.keyboardPasteResolution(
             destination: .capturedProcess(42),
-            confirmation: .mismatch
+            confirmation: .deltaMismatch
         )
 
         XCTAssertEqual(resolution.outcome, .copiedToClipboard)
         XCTAssertFalse(resolution.shouldRestoreClipboard)
+    }
+
+    func testFocusChangeKeepsTranscriptOnClipboard() {
+        let resolution = TextInsertionService.keyboardPasteResolution(
+            destination: .capturedProcess(42),
+            confirmation: .focusChanged
+        )
+
+        XCTAssertEqual(resolution.outcome, .copiedToClipboard)
+        XCTAssertFalse(resolution.shouldRestoreClipboard)
+    }
+
+    func testNoChangeKeepsTranscriptOnClipboardWithoutRestore() {
+        let resolution = TextInsertionService.keyboardPasteResolution(
+            destination: .capturedProcess(42),
+            confirmation: .noChange
+        )
+
+        XCTAssertEqual(resolution.outcome, .copiedToClipboard)
+        XCTAssertFalse(resolution.shouldRestoreClipboard)
+    }
+
+    func testNoChangeRetriesOnce() {
+        XCTAssertTrue(
+            TextInsertionService.shouldRetryKeyboardPaste(
+                confirmation: .noChange,
+                attemptCount: 1
+            )
+        )
+        XCTAssertFalse(
+            TextInsertionService.shouldRetryKeyboardPaste(
+                confirmation: .noChange,
+                attemptCount: 2
+            )
+        )
+    }
+
+    func testFocusChangeAndUnavailableAndConfirmedNeverRetry() {
+        for confirmation: KeyboardPasteConfirmation in [.focusChanged, .unavailable, .confirmed, .deltaMismatch] {
+            XCTAssertFalse(
+                TextInsertionService.shouldRetryKeyboardPaste(
+                    confirmation: confirmation,
+                    attemptCount: 1
+                )
+            )
+        }
+    }
+
+    func testIdenticalElementsMatchRegardlessOfMetadata() {
+        XCTAssertTrue(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: true,
+                capturedPid: nil,
+                currentPid: nil,
+                capturedRole: nil,
+                currentRole: nil
+            )
+        )
+    }
+
+    func testRegeneratedElementMatchesOnSamePidAndRole() {
+        XCTAssertTrue(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 42,
+                capturedRole: "AXTextArea",
+                currentRole: "AXTextArea"
+            )
+        )
+    }
+
+    func testDifferentProcessNeverMatches() {
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 84,
+                capturedRole: "AXTextArea",
+                currentRole: "AXTextArea"
+            )
+        )
+    }
+
+    func testDifferentRoleDoesNotMatch() {
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 42,
+                capturedRole: "AXTextArea",
+                currentRole: "AXButton"
+            )
+        )
+    }
+
+    func testMissingPidOrRoleDoesNotMatch() {
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: nil,
+                currentPid: nil,
+                capturedRole: "AXTextArea",
+                currentRole: "AXTextArea"
+            )
+        )
+        XCTAssertFalse(
+            TextInsertionService.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: 42,
+                currentPid: 42,
+                capturedRole: nil,
+                currentRole: nil
+            )
+        )
     }
 }

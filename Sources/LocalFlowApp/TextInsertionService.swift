@@ -29,7 +29,9 @@ enum KeyboardPasteDestination: Equatable {
 enum KeyboardPasteConfirmation: Equatable {
     case confirmed
     case unavailable
-    case mismatch
+    case focusChanged
+    case deltaMismatch
+    case noChange
 }
 
 struct KeyboardPasteResolution: Equatable {
@@ -127,12 +129,27 @@ final class TextInsertionService {
 
         // AXSelectedText is a confirmed insertion path and avoids touching the
         // user's clipboard altogether. Custom web editors generally reject it
-        // and naturally fall through to Cmd-V below.
+        // and naturally fall through to Cmd-V below — but Chromium can also
+        // accept the write and silently drop it, so success only counts when
+        // the character metrics actually move. Elements without metrics are
+        // unverifiable and take the keyboard path instead.
         if canPasteIntoFocusedElement,
            focusMatches(captured: target?.focusedElement, current: currentTarget.element),
-           insertUsingAccessibility(text, into: currentTarget.element) {
-            LocalFlowLogger.log("Paste confirmed via Accessibility chars=\(text.count)")
-            return .pasted
+           let focusedElement = currentTarget.element,
+           let metricsBeforeInsert = textMetrics(for: focusedElement),
+           insertUsingAccessibility(text, into: focusedElement) {
+            let confirmation = await confirmKeyboardPaste(
+                deliveryElement: focusedElement,
+                metricsBeforePaste: metricsBeforeInsert,
+                text: text
+            )
+            if confirmation == .confirmed {
+                LocalFlowLogger.log("Paste confirmed via Accessibility chars=\(text.count)")
+                return .pasted
+            }
+            LocalFlowLogger.log(
+                "Accessibility insert unverified reason=\(String(describing: confirmation)); falling back to keyboard paste"
+            )
         }
 
         let snapshot = restoreClipboard && canPasteIntoFocusedElement
@@ -185,28 +202,43 @@ final class TextInsertionService {
         // PID-targeted event was posted. That is unavailable evidence, not a
         // failed delivery, so retain the transcript without falsely reporting
         // that it was only copied.
-        try? await Task.sleep(for: .milliseconds(100))
-        let focusedAfterPaste = focusedTextTarget()
-        let focusStillMatches = focusMatches(
-            captured: deliveryTarget.element,
-            current: focusedAfterPaste.element
+        var attemptCount = 1
+        var confirmation = await confirmKeyboardPaste(
+            deliveryElement: deliveryTarget.element,
+            metricsBeforePaste: metricsBeforePaste,
+            text: text
         )
-        let metricsAfterPaste = textMetrics(for: focusedAfterPaste.element)
-        let expectedCharacterDelta = metricsBeforePaste.map {
-            text.utf16.count - $0.selectedCharacterCount
+        while Self.shouldRetryKeyboardPaste(
+            confirmation: confirmation,
+            attemptCount: attemptCount
+        ) {
+            guard !Task.isCancelled else {
+                break
+            }
+            let retryTarget = focusedTextTarget()
+            guard Self.shouldPaste(
+                accessibilityTrusted: isAccessibilityTrusted,
+                currentState: retryTarget.state,
+                capturedTarget: target,
+                currentProcessIdentifier: NSWorkspace.shared.frontmostApplication?.processIdentifier
+            ) else {
+                LocalFlowLogger.log("Keyboard paste retry skipped after focus changed")
+                break
+            }
+            attemptCount += 1
+            LocalFlowLogger.log("Keyboard paste retry attempt=\(attemptCount)")
+            do {
+                try await sendPasteKeystroke(to: destination)
+            } catch {
+                LocalFlowLogger.log("Keyboard paste retry failed error=\(error.localizedDescription)")
+                break
+            }
+            confirmation = await confirmKeyboardPaste(
+                deliveryElement: deliveryTarget.element,
+                metricsBeforePaste: metricsBeforePaste,
+                text: text
+            )
         }
-        let actualCharacterDelta: Int?
-        if let metricsBeforePaste, let metricsAfterPaste {
-            actualCharacterDelta = metricsAfterPaste.characterCount
-                - metricsBeforePaste.characterCount
-        } else {
-            actualCharacterDelta = nil
-        }
-        let confirmation = Self.keyboardPasteConfirmation(
-            focusStillMatches: focusStillMatches,
-            expectedCharacterDelta: expectedCharacterDelta,
-            actualCharacterDelta: actualCharacterDelta
-        )
         let resolution = Self.keyboardPasteResolution(
             destination: destination,
             confirmation: confirmation
@@ -214,14 +246,16 @@ final class TextInsertionService {
 
         switch confirmation {
         case .confirmed:
-            LocalFlowLogger.log("Keyboard paste confirmed via Accessibility metrics")
+            LocalFlowLogger.log(
+                "Keyboard paste confirmed via Accessibility metrics attempts=\(attemptCount)"
+            )
         case .unavailable where resolution.outcome == .pasted:
             LocalFlowLogger.log(
                 "Keyboard paste posted to captured process; Accessibility confirmation unavailable; transcript retained on clipboard"
             )
-        case .unavailable, .mismatch:
+        case .unavailable, .focusChanged, .deltaMismatch, .noChange:
             LocalFlowLogger.log(
-                "Keyboard paste unconfirmed; transcript retained on clipboard"
+                "Keyboard paste unconfirmed reason=\(String(describing: confirmation)) attempts=\(attemptCount); transcript retained on clipboard"
             )
         }
 
@@ -367,14 +401,18 @@ final class TextInsertionService {
         actualCharacterDelta: Int?
     ) -> KeyboardPasteConfirmation {
         guard focusStillMatches else {
-            return .mismatch
+            return .focusChanged
         }
         guard let expectedCharacterDelta, let actualCharacterDelta else {
             return .unavailable
         }
-        return expectedCharacterDelta == actualCharacterDelta
-            ? .confirmed
-            : .mismatch
+        if actualCharacterDelta == expectedCharacterDelta {
+            return .confirmed
+        }
+        if actualCharacterDelta == 0 {
+            return .noChange
+        }
+        return .deltaMismatch
     }
 
     nonisolated static func keyboardPasteResolution(
@@ -400,12 +438,48 @@ final class TextInsertionService {
                     shouldRestoreClipboard: false
                 )
             }
-        case .mismatch:
+        case .focusChanged, .deltaMismatch, .noChange:
             return KeyboardPasteResolution(
                 outcome: .copiedToClipboard,
                 shouldRestoreClipboard: false
             )
         }
+    }
+
+    // Only a confirmed no-change (character count unchanged, focus intact) is
+    // safe to retry: the keystroke observably did not land, so one more
+    // attempt cannot double-paste. A nonzero unexpected delta means some text
+    // may have landed already, so retrying that case risks double-pasting. A
+    // focus change makes redelivery unsafe, and unavailable metrics could
+    // hide a paste that already landed.
+    nonisolated static func shouldRetryKeyboardPaste(
+        confirmation: KeyboardPasteConfirmation,
+        attemptCount: Int
+    ) -> Bool {
+        confirmation == .noChange && attemptCount < 2
+    }
+
+    // Chromium regenerates AX wrapper objects for the same DOM node, so
+    // pointer inequality is not evidence that focus moved. Same process and
+    // same role is the strongest identity signal still available; missing
+    // metadata stays conservative and reports a mismatch.
+    nonisolated static func focusIdentityMatches(
+        identityEqual: Bool,
+        capturedPid: pid_t?,
+        currentPid: pid_t?,
+        capturedRole: String?,
+        currentRole: String?
+    ) -> Bool {
+        if identityEqual {
+            return true
+        }
+        guard let capturedPid, let currentPid, capturedPid == currentPid else {
+            return false
+        }
+        guard let capturedRole, let currentRole else {
+            return false
+        }
+        return capturedRole == currentRole
     }
 
     nonisolated private static func capturedApplicationIsStillActive(
@@ -581,12 +655,41 @@ final class TextInsertionService {
     ) -> Bool {
         switch (captured, current) {
         case let (.some(captured), .some(current)):
-            return CFEqual(captured, current)
+            if CFEqual(captured, current) {
+                return true
+            }
+            return Self.focusIdentityMatches(
+                identityEqual: false,
+                capturedPid: processIdentifier(of: captured),
+                currentPid: processIdentifier(of: current),
+                capturedRole: role(of: captured),
+                currentRole: role(of: current)
+            )
         case (nil, nil):
             return true
         default:
             return false
         }
+    }
+
+    private func processIdentifier(of element: AXUIElement) -> pid_t? {
+        var elementPid: pid_t = 0
+        guard AXUIElementGetPid(element, &elementPid) == .success else {
+            return nil
+        }
+        return elementPid
+    }
+
+    private func role(of element: AXUIElement) -> String? {
+        var roleValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXRoleAttribute as CFString,
+            &roleValue
+        ) == .success else {
+            return nil
+        }
+        return roleValue as? String
     }
 
     private func textMetrics(for element: AXUIElement?) -> TextMetrics? {
@@ -616,6 +719,50 @@ final class TextInsertionService {
             characterCount: characterCount,
             selectedCharacterCount: selectedCount
         )
+    }
+
+    private func confirmKeyboardPaste(
+        deliveryElement: AXUIElement?,
+        metricsBeforePaste: TextMetrics?,
+        text: String
+    ) async -> KeyboardPasteConfirmation {
+        // Electron editors regularly need several hundred milliseconds to
+        // process a synthetic Cmd-V; a single early check misreads slow
+        // delivery as failure. Without baseline metrics no amount of polling
+        // can produce evidence, so a single focus check suffices.
+        let deadline = ContinuousClock.now.advanced(by: .milliseconds(1_000))
+        var confirmation: KeyboardPasteConfirmation = .unavailable
+        repeat {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else {
+                return confirmation
+            }
+            let focusedAfterPaste = focusedTextTarget()
+            let focusStillMatches = focusMatches(
+                captured: deliveryElement,
+                current: focusedAfterPaste.element
+            )
+            let metricsAfterPaste = textMetrics(for: focusedAfterPaste.element)
+            let expectedCharacterDelta = metricsBeforePaste.map {
+                text.utf16.count - $0.selectedCharacterCount
+            }
+            let actualCharacterDelta: Int?
+            if let metricsBeforePaste, let metricsAfterPaste {
+                actualCharacterDelta = metricsAfterPaste.characterCount
+                    - metricsBeforePaste.characterCount
+            } else {
+                actualCharacterDelta = nil
+            }
+            confirmation = Self.keyboardPasteConfirmation(
+                focusStillMatches: focusStillMatches,
+                expectedCharacterDelta: expectedCharacterDelta,
+                actualCharacterDelta: actualCharacterDelta
+            )
+            if confirmation == .confirmed || metricsBeforePaste == nil {
+                return confirmation
+            }
+        } while ContinuousClock.now < deadline
+        return confirmation
     }
 
     private func restore(_ snapshot: ClipboardSnapshot, to pasteboard: NSPasteboard) {
@@ -650,7 +797,18 @@ final class TextInsertionService {
         keyDown: Bool,
         to destination: KeyboardPasteDestination
     ) throws {
-        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+        // Chromium/Electron apps drop or defer events injected with
+        // postToPid; the HID tap is the delivery path they reliably handle.
+        // shouldPaste re-verifies the captured process is frontmost right
+        // before posting, so the global event cannot reach another app.
+        let stateID: CGEventSourceStateID
+        switch destination {
+        case .capturedProcess:
+            stateID = .hidSystemState
+        case .session:
+            stateID = .combinedSessionState
+        }
+        guard let source = CGEventSource(stateID: stateID) else {
             throw TextInsertionError.pasteEventCreationFailed
         }
         let keyCode: CGKeyCode = 9 // v
@@ -665,8 +823,8 @@ final class TextInsertionService {
         event.flags = .maskCommand
 
         switch destination {
-        case let .capturedProcess(processIdentifier):
-            event.postToPid(processIdentifier)
+        case .capturedProcess:
+            event.post(tap: .cghidEventTap)
         case .session:
             event.post(tap: .cgSessionEventTap)
         }
