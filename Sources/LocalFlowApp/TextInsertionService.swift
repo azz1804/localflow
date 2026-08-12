@@ -662,7 +662,18 @@ final class TextInsertionService {
         keyDown: Bool,
         to destination: KeyboardPasteDestination
     ) throws {
-        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+        // Chromium/Electron apps drop or defer events injected with
+        // postToPid; the HID tap is the delivery path they reliably handle.
+        // shouldPaste re-verifies the captured process is frontmost right
+        // before posting, so the global event cannot reach another app.
+        let stateID: CGEventSourceStateID
+        switch destination {
+        case .capturedProcess:
+            stateID = .hidSystemState
+        case .session:
+            stateID = .combinedSessionState
+        }
+        guard let source = CGEventSource(stateID: stateID) else {
             throw TextInsertionError.pasteEventCreationFailed
         }
         let keyCode: CGKeyCode = 9 // v
@@ -677,8 +688,8 @@ final class TextInsertionService {
         event.flags = .maskCommand
 
         switch destination {
-        case let .capturedProcess(processIdentifier):
-            event.postToPid(processIdentifier)
+        case .capturedProcess:
+            event.post(tap: .cghidEventTap)
         case .session:
             event.post(tap: .cgSessionEventTap)
         }
