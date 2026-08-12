@@ -6,6 +6,7 @@ REF="${LOCALFLOW_REF:-main}"
 DEST_DIR="${LOCALFLOW_DEST_DIR:-/Applications}"
 SOURCE_DIR="${LOCALFLOW_SOURCE_DIR:-}"
 SKIP_API_KEY="${LOCALFLOW_SKIP_API_KEY:-0}"
+RESET_API_KEY="${LOCALFLOW_RESET_API_KEY:-0}"
 EXPECTED_SHA256="${LOCALFLOW_SHA256:-}"
 TEMP_DIR=""
 
@@ -116,10 +117,12 @@ has_interactive_terminal() {
   [[ -t 0 || -t 1 || -t 2 ]]
 }
 
-if has_usable_api_key "$SUPPORT_ENV"; then
+if has_usable_api_key "$SUPPORT_ENV" && [[ "$RESET_API_KEY" != "1" ]]; then
   info "Keeping the existing LocalFlow configuration."
 elif [[ "$SKIP_API_KEY" != "1" ]] && has_interactive_terminal; then
-  if [[ -f "$SUPPORT_ENV" ]]; then
+  if [[ "$RESET_API_KEY" == "1" ]]; then
+    info "Replacing the configured OpenAI API key."
+  elif [[ -f "$SUPPORT_ENV" ]]; then
     info "The existing configuration has no usable OpenAI API key."
   fi
   printf '\nOpenAI API key (input hidden, press Return to configure it later): ' > /dev/tty

@@ -41,6 +41,12 @@ The installer downloads the latest source, builds LocalFlow, installs it in `/Ap
 
 If an earlier installation contains an empty or placeholder API key, rerunning the same command now offers to repair the key while preserving modes, hotkeys, themes, and history.
 
+To replace a key that exists but is rejected by OpenAI, run:
+
+```bash
+LOCALFLOW_RESET_API_KEY=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/azz1804/localflow/main/install.sh)"
+```
+
 If Xcode Command Line Tools are missing, macOS opens their installer. Once it finishes, run the command again.
 
 ### Manual install
