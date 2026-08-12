@@ -129,12 +129,27 @@ final class TextInsertionService {
 
         // AXSelectedText is a confirmed insertion path and avoids touching the
         // user's clipboard altogether. Custom web editors generally reject it
-        // and naturally fall through to Cmd-V below.
+        // and naturally fall through to Cmd-V below — but Chromium can also
+        // accept the write and silently drop it, so success only counts when
+        // the character metrics actually move. Elements without metrics are
+        // unverifiable and take the keyboard path instead.
         if canPasteIntoFocusedElement,
            focusMatches(captured: target?.focusedElement, current: currentTarget.element),
-           insertUsingAccessibility(text, into: currentTarget.element) {
-            LocalFlowLogger.log("Paste confirmed via Accessibility chars=\(text.count)")
-            return .pasted
+           let focusedElement = currentTarget.element,
+           let metricsBeforeInsert = textMetrics(for: focusedElement),
+           insertUsingAccessibility(text, into: focusedElement) {
+            let confirmation = await confirmKeyboardPaste(
+                deliveryElement: focusedElement,
+                metricsBeforePaste: metricsBeforeInsert,
+                text: text
+            )
+            if confirmation == .confirmed {
+                LocalFlowLogger.log("Paste confirmed via Accessibility chars=\(text.count)")
+                return .pasted
+            }
+            LocalFlowLogger.log(
+                "Accessibility insert unverified reason=\(String(describing: confirmation)); falling back to keyboard paste"
+            )
         }
 
         let snapshot = restoreClipboard && canPasteIntoFocusedElement
