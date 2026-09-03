@@ -491,17 +491,27 @@ final class FloatingBarController {
         positionPanelIfNeeded()
         showPanel()
 
-        switch status {
-        case .done, .error:
+        if let dismissDelay = Self.dismissDelay(for: status) {
             hideTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(1.2))
+                try? await Task.sleep(for: .seconds(dismissDelay))
                 guard !Task.isCancelled else {
                     return
                 }
                 self?.hidePanel(animated: true)
             }
-        default:
-            break
+        }
+    }
+
+    /// Errors often arrive after a long wait, when the user has looked away,
+    /// so they linger longer than a routine success.
+    static func dismissDelay(for status: AppStatus) -> TimeInterval? {
+        switch status {
+        case .done:
+            return 1.2
+        case .error:
+            return 4
+        case .idle, .recording, .processing:
+            return nil
         }
     }
 
