@@ -9,8 +9,8 @@ public struct OpenAIRetryPolicy: Sendable {
 
     public init(
         maxAttempts: Int = 3,
-        initialDelay: TimeInterval = 0.2,
-        maximumDelay: TimeInterval = 1
+        initialDelay: TimeInterval = 1,
+        maximumDelay: TimeInterval = 4
     ) {
         let safeMaximumDelay = maximumDelay.isFinite ? maximumDelay : 1
         let safeInitialDelay = initialDelay.isFinite ? initialDelay : 0.2
@@ -18,6 +18,41 @@ public struct OpenAIRetryPolicy: Sendable {
         self.maxAttempts = min(max(maxAttempts, 1), 5)
         self.maximumDelay = min(max(safeMaximumDelay, 0), 10)
         self.initialDelay = min(max(safeInitialDelay, 0), self.maximumDelay)
+    }
+}
+
+/// Wall-clock budget for a single request attempt. Healthy transcriptions
+/// finish in a few seconds, so a stalled connection is abandoned early and
+/// retried on a fresh one instead of waiting for the idle timeout.
+public struct OpenAIRequestTimeouts: Sendable {
+    public static let `default` = OpenAIRequestTimeouts()
+
+    public let transcriptionBase: TimeInterval
+    public let transcriptionPerMegabyte: TimeInterval
+    public let transcriptionMaximum: TimeInterval
+    public let polish: TimeInterval
+    public let promptMode: TimeInterval
+
+    public init(
+        transcriptionBase: TimeInterval = 20,
+        transcriptionPerMegabyte: TimeInterval = 6,
+        transcriptionMaximum: TimeInterval = 90,
+        polish: TimeInterval = 45,
+        promptMode: TimeInterval = 30
+    ) {
+        self.transcriptionBase = max(0.001, transcriptionBase)
+        self.transcriptionPerMegabyte = max(0, transcriptionPerMegabyte)
+        self.transcriptionMaximum = max(self.transcriptionBase, transcriptionMaximum)
+        self.polish = max(0.001, polish)
+        self.promptMode = max(0.001, promptMode)
+    }
+
+    public func transcription(uploadByteCount: Int64) -> TimeInterval {
+        let megabytes = Double(max(0, uploadByteCount)) / 1_048_576
+        return min(
+            transcriptionMaximum,
+            transcriptionBase + transcriptionPerMegabyte * megabytes
+        )
     }
 }
 
@@ -84,19 +119,36 @@ public enum OpenAIClientError: Error, LocalizedError {
 public final class OpenAIClient: @unchecked Sendable {
     private typealias Sleeper = @Sendable (TimeInterval) async throws -> Void
 
+    public typealias SessionFactory = @Sendable () -> URLSession
+
     private let apiKey: String
-    private let session: URLSession
+    private let sessionFactory: SessionFactory
     private let retryPolicy: OpenAIRetryPolicy
+    private let timeouts: OpenAIRequestTimeouts
+    private let diagnostics: (@Sendable (String) -> Void)?
     private let sleeper: Sleeper
+
+    /// Every attempt runs on a brand-new ephemeral session. URLSession
+    /// silently upgrades a host to HTTP/3 once a response advertises it and
+    /// remembers that on disk for a day; QUIC uploads then stall on networks
+    /// that mishandle bursts of UDP, while the same upload over HTTP/2 takes
+    /// a few seconds. A session that has learned nothing always starts on TCP.
+    public static let isolatedSessionFactory: SessionFactory = {
+        URLSession(configuration: .ephemeral)
+    }
 
     public init(
         apiKey: String,
-        session: URLSession = .shared,
-        retryPolicy: OpenAIRetryPolicy = .default
+        sessionFactory: @escaping SessionFactory = OpenAIClient.isolatedSessionFactory,
+        retryPolicy: OpenAIRetryPolicy = .default,
+        timeouts: OpenAIRequestTimeouts = .default,
+        diagnostics: (@Sendable (String) -> Void)? = nil
     ) {
         self.apiKey = apiKey
-        self.session = session
+        self.sessionFactory = sessionFactory
         self.retryPolicy = retryPolicy
+        self.timeouts = timeouts
+        self.diagnostics = diagnostics
         self.sleeper = { delay in
             guard delay > 0 else {
                 return
@@ -108,13 +160,17 @@ public final class OpenAIClient: @unchecked Sendable {
 
     init(
         apiKey: String,
-        session: URLSession,
+        sessionFactory: @escaping SessionFactory,
         retryPolicy: OpenAIRetryPolicy,
+        timeouts: OpenAIRequestTimeouts = .default,
+        diagnostics: (@Sendable (String) -> Void)? = nil,
         sleeper: @escaping @Sendable (TimeInterval) async throws -> Void
     ) {
         self.apiKey = apiKey
-        self.session = session
+        self.sessionFactory = sessionFactory
         self.retryPolicy = retryPolicy
+        self.timeouts = timeouts
+        self.diagnostics = diagnostics
         self.sleeper = sleeper
     }
 
@@ -178,9 +234,12 @@ public final class OpenAIClient: @unchecked Sendable {
         }
         try Task.checkCancellation()
 
+        let attemptTimeout = timeouts.transcription(
+            uploadByteCount: Int64(clamping: multipartContentLength)
+        )
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = Self.transcriptionRequestTimeout
+        request.timeoutInterval = attemptTimeout
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue(multipartContentType, forHTTPHeaderField: "Content-Type")
         request.setValue(
@@ -190,7 +249,8 @@ public final class OpenAIClient: @unchecked Sendable {
 
         let (data, response) = try await send(
             request,
-            uploadFileURL: multipartURL
+            uploadFileURL: multipartURL,
+            attemptTimeout: attemptTimeout
         )
         try validate(response: response, data: data)
 
@@ -224,12 +284,15 @@ public final class OpenAIClient: @unchecked Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = Self.polishRequestTimeout
+        request.timeoutInterval = timeouts.polish
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
-        let (data, response) = try await send(request)
+        let (data, response) = try await send(
+            request,
+            attemptTimeout: timeouts.polish
+        )
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
@@ -270,12 +333,15 @@ public final class OpenAIClient: @unchecked Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = Self.promptModeRequestTimeout
+        request.timeoutInterval = timeouts.promptMode
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
-        let (data, response) = try await send(request)
+        let (data, response) = try await send(
+            request,
+            attemptTimeout: timeouts.promptMode
+        )
         try validate(response: response, data: data)
 
         let decoded = try JSONDecoder().decode(
@@ -296,27 +362,37 @@ public final class OpenAIClient: @unchecked Sendable {
 
     private func send(
         _ request: URLRequest,
-        uploadFileURL: URL? = nil
+        uploadFileURL: URL? = nil,
+        attemptTimeout: TimeInterval
     ) async throws -> (Data, URLResponse) {
+        let endpoint = request.url?.lastPathComponent ?? "unknown"
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
         for attempt in 1...retryPolicy.maxAttempts {
             try Task.checkCancellation()
             let result: (Data, URLResponse)
 
             do {
-                if let uploadFileURL {
-                    result = try await session.upload(
-                        for: request,
-                        fromFile: uploadFileURL
-                    )
-                } else {
-                    result = try await session.data(for: request)
-                }
+                result = try await perform(
+                    request,
+                    uploadFileURL: uploadFileURL,
+                    attemptTimeout: attemptTimeout
+                )
             } catch {
-                guard attempt < retryPolicy.maxAttempts, isRetryableNetworkError(error) else {
+                try Task.checkCancellation()
+                let elapsedMs = Self.elapsedMilliseconds(since: startedAt)
+                guard attempt < retryPolicy.maxAttempts, Self.isTransientNetworkError(error) else {
+                    diagnostics?(
+                        "OpenAI request failed endpoint=\(endpoint) attempts=\(attempt) elapsedMs=\(elapsedMs) error=\(Self.describe(error))"
+                    )
                     throw error
                 }
 
-                try await sleeper(retryDelay(afterFailedAttempt: attempt, response: nil))
+                let delay = retryDelay(afterFailedAttempt: attempt, response: nil)
+                diagnostics?(
+                    "OpenAI request retry endpoint=\(endpoint) attempt=\(attempt)/\(retryPolicy.maxAttempts) elapsedMs=\(elapsedMs) delayMs=\(Int((delay * 1_000).rounded())) error=\(Self.describe(error))"
+                )
+                try await sleeper(delay)
                 continue
             }
 
@@ -325,7 +401,11 @@ public final class OpenAIClient: @unchecked Sendable {
                 let httpResponse = result.1 as? HTTPURLResponse,
                 isRetryableHTTPStatus(httpResponse.statusCode)
             {
-                try await sleeper(retryDelay(afterFailedAttempt: attempt, response: httpResponse))
+                let delay = retryDelay(afterFailedAttempt: attempt, response: httpResponse)
+                diagnostics?(
+                    "OpenAI request retry endpoint=\(endpoint) attempt=\(attempt)/\(retryPolicy.maxAttempts) elapsedMs=\(Self.elapsedMilliseconds(since: startedAt)) delayMs=\(Int((delay * 1_000).rounded())) status=\(httpResponse.statusCode)"
+                )
+                try await sleeper(delay)
                 continue
             }
 
@@ -334,6 +414,51 @@ public final class OpenAIClient: @unchecked Sendable {
 
         // maxAttempts is clamped to at least one, so execution cannot reach this point.
         throw OpenAIClientError.invalidResponse
+    }
+
+    /// Runs one attempt under a wall-clock deadline. URLSession's own
+    /// `timeoutInterval` only fires after that much *idle* time, so a link that
+    /// trickles bytes or silently retransmits can hold an attempt far longer
+    /// than a healthy request ever needs.
+    private func perform(
+        _ request: URLRequest,
+        uploadFileURL: URL?,
+        attemptTimeout: TimeInterval
+    ) async throws -> (Data, URLResponse) {
+        let session = sessionFactory()
+        defer { session.finishTasksAndInvalidate() }
+        return try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+            group.addTask {
+                if let uploadFileURL {
+                    return try await session.upload(for: request, fromFile: uploadFileURL)
+                }
+                return try await session.data(for: request)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(attemptTimeout * 1_000_000_000))
+                throw URLError(
+                    .timedOut,
+                    userInfo: [NSLocalizedDescriptionKey: "The request timed out."]
+                )
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw URLError(.timedOut)
+            }
+            return result
+        }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else {
+            return error.localizedDescription
+        }
+        return "urlError(\(nsError.code)) \(error.localizedDescription)"
+    }
+
+    private static func elapsedMilliseconds(since startedAt: TimeInterval) -> Int {
+        Int(((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000).rounded())
     }
 
     private func retryDelay(afterFailedAttempt attempt: Int, response: HTTPURLResponse?) -> TimeInterval {
@@ -357,11 +482,9 @@ public final class OpenAIClient: @unchecked Sendable {
         statusCode == 429 || [500, 502, 503, 504].contains(statusCode)
     }
 
-    private func isRetryableNetworkError(_ error: Error) -> Bool {
-        guard !Task.isCancelled else {
-            return false
-        }
-
+    /// A failure that never reached OpenAI's servers (or lost the answer on
+    /// the way back), so the same request is worth sending again.
+    public static func isTransientNetworkError(_ error: Error) -> Bool {
         let error = error as NSError
         guard error.domain == NSURLErrorDomain else {
             return false
@@ -429,9 +552,6 @@ public final class OpenAIClient: @unchecked Sendable {
     }
 
     private static let maximumAudioUploadByteCount: Int64 = 25 * 1_024 * 1_024
-    private static let transcriptionRequestTimeout: TimeInterval = 90
-    private static let polishRequestTimeout: TimeInterval = 45
-    private static let promptModeRequestTimeout: TimeInterval = 30
     private static let maximumErrorBodyByteCount = 8 * 1_024
 }
 

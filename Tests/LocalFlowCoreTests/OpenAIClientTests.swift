@@ -260,7 +260,8 @@ final class OpenAIClientTests: XCTestCase {
 
         XCTAssertEqual(result, "Bonjour LocalFlow")
         XCTAssertEqual(script.requestCount, 1)
-        XCTAssertEqual(script.lastRequest?.timeoutInterval, 90)
+        let timeout = try XCTUnwrap(script.lastRequest?.timeoutInterval)
+        XCTAssertEqual(timeout, 20, accuracy: 0.1)
         XCTAssertTrue(
             script.lastRequest?.value(forHTTPHeaderField: "Content-Type")?
                 .hasPrefix("multipart/form-data; boundary=") == true
@@ -353,15 +354,223 @@ final class OpenAIClientTests: XCTestCase {
         XCTAssertEqual(script.requestCount, 0)
     }
 
-    private func makeClient(delays: DelayRecorder) -> OpenAIClient {
+
+    func testRetryPolicyDefaultsWaitLongEnoughForANetworkToRecover() {
+        let policy = OpenAIRetryPolicy.default
+
+        XCTAssertEqual(policy.maxAttempts, 3)
+        XCTAssertEqual(policy.initialDelay, 1)
+        XCTAssertEqual(policy.maximumDelay, 4)
+    }
+
+    func testTranscriptionAttemptTimeoutScalesWithUploadSize() {
+        let timeouts = OpenAIRequestTimeouts.default
+
+        XCTAssertEqual(timeouts.transcription(uploadByteCount: 0), 20, accuracy: 0.001)
+        XCTAssertEqual(
+            timeouts.transcription(uploadByteCount: 2_621_440),
+            35,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            timeouts.transcription(uploadByteCount: 20 * 1_024 * 1_024),
+            90,
+            accuracy: 0.001
+        )
+    }
+
+    func testStalledTranscriptionAttemptIsAbortedAndRetried() async throws {
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalFlow-stall-test-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        try Data(repeating: 0x42, count: 4_096).write(to: audioURL)
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        let script = ResponseScript([
+            .stall,
+            .http(status: 200, body: #"{"text":"Après blocage"}"#, headers: [:])
+        ])
+        URLProtocolStub.install(script)
+        let delays = DelayRecorder()
+        let client = makeClient(
+            delays: delays,
+            timeouts: OpenAIRequestTimeouts(
+                transcriptionBase: 0.05,
+                transcriptionPerMegabyte: 0,
+                transcriptionMaximum: 0.05
+            )
+        )
+
+        let started = Date()
+        let result = try await client.transcribeAudio(
+            fileURL: audioURL,
+            model: "gpt-4o-transcribe",
+            language: "fr",
+            prompt: ""
+        )
+
+        XCTAssertEqual(result, "Après blocage")
+        XCTAssertEqual(script.requestCount, 2)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        let recordedDelays = await delays.snapshot()
+        XCTAssertEqual(recordedDelays, [0.01])
+    }
+
+    func testStalledPromptModeAttemptIsAbortedAndRetried() async throws {
+        let script = ResponseScript([
+            .stall,
+            .http(
+                status: 200,
+                body: #"{"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}"#,
+                headers: [:]
+            )
+        ])
+        URLProtocolStub.install(script)
+        let delays = DelayRecorder()
+        let client = makeClient(
+            delays: delays,
+            timeouts: OpenAIRequestTimeouts(promptMode: 0.05)
+        )
+
+        let result = try await client.rewriteAsPrompt(
+            text: "texte",
+            model: "gpt-test",
+            systemPrompt: "Réécris",
+            userPrompt: "texte"
+        )
+
+        XCTAssertEqual(result, "OK")
+        XCTAssertEqual(script.requestCount, 2)
+        let recordedDelays = await delays.snapshot()
+        XCTAssertEqual(recordedDelays, [0.01])
+    }
+
+    func testStalledAttemptsSurfaceAReadableTimeoutError() async throws {
+        let script = ResponseScript([.stall, .stall, .stall])
+        URLProtocolStub.install(script)
+        let client = makeClient(
+            delays: DelayRecorder(),
+            timeouts: OpenAIRequestTimeouts(promptMode: 0.05)
+        )
+
+        do {
+            _ = try await client.rewriteAsPrompt(
+                text: "texte",
+                model: "gpt-test",
+                systemPrompt: "Réécris",
+                userPrompt: "texte"
+            )
+            XCTFail("A fully stalled request should fail")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+            XCTAssertEqual(error.localizedDescription, "The request timed out.")
+        }
+        XCTAssertEqual(script.requestCount, 3)
+    }
+
+    /// URLSession upgrades to HTTP/3 once a response advertises it, and it
+    /// remembers that on disk. QUIC uploads stall on some networks, so every
+    /// attempt must start from a session that has learned nothing.
+    func testEachAttemptUsesAFreshSession() async throws {
+        let script = ResponseScript([
+            .http(status: 503, body: "unavailable", headers: [:]),
+            .http(
+                status: 200,
+                body: #"{"choices":[{"message":{"role":"assistant","content":"OK"}}]}"#,
+                headers: [:]
+            )
+        ])
+        URLProtocolStub.install(script)
+        let sessions = SessionRecorder()
+        let client = OpenAIClient(
+            apiKey: "sk-test",
+            sessionFactory: { sessions.make() },
+            retryPolicy: OpenAIRetryPolicy(maxAttempts: 3, initialDelay: 0.01, maximumDelay: 0.05),
+            sleeper: { _ in }
+        )
+
+        let result = try await client.polish(
+            text: "texte",
+            model: "gpt-test",
+            systemPrompt: "Corrige",
+            userPrompt: "texte"
+        )
+
+        XCTAssertEqual(result, "OK")
+        let created = sessions.snapshot()
+        XCTAssertEqual(created.count, 2)
+        XCTAssertTrue(created[0] !== created[1])
+    }
+
+    func testDiagnosticsReportEachRetryAndTheFinalFailure() async throws {
+        let script = ResponseScript([
+            .failure(URLError(.timedOut)),
+            .failure(URLError(.networkConnectionLost)),
+            .failure(URLError(.timedOut))
+        ])
+        URLProtocolStub.install(script)
+        let diagnostics = DiagnosticsRecorder()
+        let client = makeClient(
+            delays: DelayRecorder(),
+            diagnostics: { diagnostics.append($0) }
+        )
+
+        do {
+            _ = try await client.polish(
+                text: "texte",
+                model: "gpt-test",
+                systemPrompt: "Corrige",
+                userPrompt: "texte"
+            )
+            XCTFail("The final network failure should be returned")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+        }
+
+        let messages = diagnostics.snapshot()
+        XCTAssertEqual(messages.count, 3)
+        XCTAssertTrue(messages[0].contains("endpoint=completions"))
+        XCTAssertTrue(messages[0].contains("attempt=1/3"))
+        XCTAssertTrue(messages[0].contains("delayMs=10"))
+        XCTAssertTrue(messages[0].contains("urlError(-1001)"))
+        XCTAssertTrue(messages[1].contains("attempt=2/3"))
+        XCTAssertTrue(messages[1].contains("urlError(-1005)"))
+        XCTAssertTrue(messages[2].contains("failed"))
+        XCTAssertTrue(messages[2].contains("attempts=3"))
+        XCTAssertTrue(messages[2].contains("urlError(-1001)"))
+    }
+
+    func testTransientNetworkErrorClassification() {
+        XCTAssertTrue(OpenAIClient.isTransientNetworkError(URLError(.timedOut)))
+        XCTAssertTrue(
+            OpenAIClient.isTransientNetworkError(URLError(.networkConnectionLost))
+        )
+        XCTAssertTrue(
+            OpenAIClient.isTransientNetworkError(URLError(.notConnectedToInternet))
+        )
+        XCTAssertFalse(OpenAIClient.isTransientNetworkError(URLError(.badURL)))
+        XCTAssertFalse(
+            OpenAIClient.isTransientNetworkError(
+                OpenAIClientError.badStatus(500, "")
+            )
+        )
+    }
+
+    private func makeClient(
+        delays: DelayRecorder,
+        timeouts: OpenAIRequestTimeouts = .default,
+        diagnostics: (@Sendable (String) -> Void)? = nil
+    ) -> OpenAIClient {
         OpenAIClient(
             apiKey: "sk-test",
-            session: makeSession(),
+            sessionFactory: { Self.makeSession() },
             retryPolicy: OpenAIRetryPolicy(
                 maxAttempts: 3,
                 initialDelay: 0.01,
                 maximumDelay: 0.05
             ),
+            timeouts: timeouts,
+            diagnostics: diagnostics,
             sleeper: { delay in
                 await delays.append(delay)
             }
@@ -391,10 +600,48 @@ final class OpenAIClientTests: XCTestCase {
         return data
     }
 
-    private func makeSession() -> URLSession {
+    private static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [URLProtocolStub.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+private final class SessionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sessions: [URLSession] = []
+
+    func make() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [URLProtocolStub.self]
+        let session = URLSession(configuration: configuration)
+        lock.lock()
+        sessions.append(session)
+        lock.unlock()
+        return session
+    }
+
+    func snapshot() -> [URLSession] {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessions
+    }
+}
+
+private final class DiagnosticsRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+
+    func append(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        messages.append(message)
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages
     }
 }
 
@@ -414,6 +661,9 @@ private final class ResponseScript: @unchecked Sendable {
     enum Outcome {
         case failure(Error)
         case http(status: Int, body: String, headers: [String: String])
+        /// Accepts the request and never answers, like a dead pooled
+        /// connection whose TCP retransmissions are silently dropped.
+        case stall
     }
 
     private let lock = NSLock()
@@ -479,6 +729,8 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
         }
 
         switch script.next(request: request) {
+        case .stall:
+            break
         case .failure(let error):
             client?.urlProtocol(self, didFailWithError: error)
         case .http(let status, let body, let headers):

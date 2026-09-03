@@ -36,6 +36,8 @@ final class DictationController {
     private var pendingRecordingStartTask: Task<Void, Never>?
     private var finalizationTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
+    private var scheduledRecoveryTask: Task<Void, Never>?
+    private var consecutiveRecoveryFailures = 0
     private var pendingRecordingMode: RecordingMode?
     private var pendingDoubleClapTargetRestoration = false
     private var activePendingJobID: UUID?
@@ -85,7 +87,12 @@ final class DictationController {
               configuration.isOpenAIConfigured else {
             return nil
         }
-        return OpenAIClient(apiKey: apiKey)
+        return OpenAIClient(
+            apiKey: apiKey,
+            diagnostics: { message in
+                LocalFlowLogger.log(message)
+            }
+        )
     }
 
     func beginHoldRecording() {
@@ -489,7 +496,9 @@ final class DictationController {
     /// happens to be focused after relaunch.
     func resumePendingDictations() {
         guard processingTask == nil,
+              pendingRecordingStartTask == nil,
               !isStarting,
+              !isFinalizingRecording,
               !audioRecorder.isRecording,
               let context = makeProcessingContext() else {
             return
@@ -516,7 +525,8 @@ final class DictationController {
                     )
                     return
                 }
-                self.setStatus(.processing)
+                // Recovery stays invisible: the "Refining your words" bar only
+                // makes sense right after the user dictated something.
                 LocalFlowLogger.log(
                     "Pending recovery started count=\(jobs.count)"
                 )
@@ -544,6 +554,8 @@ final class DictationController {
         if let finalizationTask {
             await finalizationTask.value
         }
+        scheduledRecoveryTask?.cancel()
+        scheduledRecoveryTask = nil
         processingTask?.cancel()
         processingTask = nil
         isProcessing = false
@@ -1023,14 +1035,23 @@ final class DictationController {
         activePendingJobID = nil
         isProcessing = false
         isRecoveringPendingJobs = false
+        consecutiveRecoveryFailures = 0
         resetRecordingState()
         if recovered {
             completedForegroundStatus = nil
-            setStatus(.idle)
             LocalFlowLogger.log("Pending recovery finished")
-        } else if let completedForegroundStatus {
-            self.completedForegroundStatus = nil
-            setStatus(completedForegroundStatus)
+        } else {
+            if let completedForegroundStatus {
+                self.completedForegroundStatus = nil
+                setStatus(completedForegroundStatus)
+            }
+            // The network just worked, so dictations parked by an earlier
+            // outage can be transcribed into History now instead of waiting
+            // for the next launch.
+            scheduleRecovery(
+                after: PendingRecoveryRetryPolicy.delayAfterSuccessfulDictation,
+                reason: "dictation-succeeded"
+            )
         }
     }
 
@@ -1051,6 +1072,7 @@ final class DictationController {
         guard processingGeneration == generation else {
             return
         }
+        let wasRecovering = isRecoveringPendingJobs
         processingTask = nil
         activePendingJobID = nil
         isProcessing = false
@@ -1058,16 +1080,50 @@ final class DictationController {
         completedForegroundStatus = nil
         resetRecordingState()
         LocalFlowLogger.log(
-            "Processing deferred for retry error=\(error.localizedDescription)"
+            "Processing deferred for retry recovery=\(wasRecovering) error=\(error.localizedDescription)"
         )
         if let guidance = Self.setupGuidance(for: error) {
             onSetupRequired?(guidance)
         }
-        setStatus(
-            .error(
-                "\(error.localizedDescription) The dictation was saved for retry."
+
+        if OpenAIClient.isTransientNetworkError(error) {
+            consecutiveRecoveryFailures += 1
+            scheduleRecovery(
+                after: PendingRecoveryRetryPolicy.delay(
+                    afterConsecutiveFailures: consecutiveRecoveryFailures
+                ),
+                reason: "network-failure"
             )
+        }
+
+        // A background retry that fails again must not keep flashing the
+        // error bar while the network is down; the user already saw it once.
+        guard !wasRecovering else {
+            return
+        }
+        setStatus(.error(Self.failureMessage(for: error)))
+    }
+
+    static func failureMessage(for error: Error) -> String {
+        if OpenAIClient.isTransientNetworkError(error) {
+            return "Network problem: \(error.localizedDescription) The dictation was saved and will be retried in the background; its text will appear in History."
+        }
+        return "\(error.localizedDescription) The dictation was saved for retry."
+    }
+
+    private func scheduleRecovery(after delay: TimeInterval, reason: String) {
+        scheduledRecoveryTask?.cancel()
+        LocalFlowLogger.log(
+            "Pending recovery scheduled inSeconds=\(Int(delay.rounded())) reason=\(reason)"
         )
+        scheduledRecoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            self.scheduledRecoveryTask = nil
+            self.resumePendingDictations()
+        }
     }
 
     private func startRecordingStatusLoop() {
@@ -1198,5 +1254,20 @@ final class DictationController {
 
     private func removeTemporaryFile(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+/// When parked dictations are retried without relaunching the app.
+enum PendingRecoveryRetryPolicy {
+    /// A successful request proves the network is back; recover soon after
+    /// the result bar has been dismissed.
+    static let delayAfterSuccessfulDictation: TimeInterval = 5
+
+    private static let firstRetryDelay: TimeInterval = 30
+    private static let maximumRetryDelay: TimeInterval = 300
+
+    static func delay(afterConsecutiveFailures failures: Int) -> TimeInterval {
+        let exponent = max(0, min(failures - 1, 8))
+        return min(maximumRetryDelay, firstRetryDelay * pow(2, Double(exponent)))
     }
 }
