@@ -202,6 +202,60 @@ final class FloatingBarPresentationTests: XCTestCase {
         )
     }
 
+    func testPlacementMovesToAnotherScreenKeepingItsAnchor() {
+        let main = NSRect(x: 0, y: 0, width: 1_440, height: 900)
+        let external = NSRect(x: 1_440, y: -200, width: 2_560, height: 1_440)
+
+        let bottomCenter = FloatingBarPlacement.translatedCenter(
+            NSPoint(x: 720, y: 82),
+            from: main,
+            to: external
+        )
+        XCTAssertEqual(bottomCenter.x, external.midX, accuracy: 0.001)
+        XCTAssertEqual(bottomCenter.y, external.minY + 82, accuracy: 0.001)
+
+        let topRight = FloatingBarPlacement.translatedCenter(
+            NSPoint(x: 1_400, y: 860),
+            from: main,
+            to: external
+        )
+        XCTAssertEqual(topRight.x, external.maxX - 40, accuracy: 0.001)
+        XCTAssertEqual(topRight.y, external.maxY - 40, accuracy: 0.001)
+    }
+
+    func testBarFollowsThePointerOnlyWhenASessionStarts() {
+        XCTAssertTrue(
+            FloatingBarController.startsNewSession(
+                from: .idle,
+                to: .recording(0, .hold)
+            )
+        )
+        XCTAssertTrue(
+            FloatingBarController.startsNewSession(
+                from: .done("ok", .pasted),
+                to: .recording(0, .toggle)
+            )
+        )
+        XCTAssertFalse(
+            FloatingBarController.startsNewSession(
+                from: .recording(1, .hold),
+                to: .recording(2, .hold)
+            )
+        )
+        XCTAssertFalse(
+            FloatingBarController.startsNewSession(
+                from: .recording(4, .hold),
+                to: .processing
+            )
+        )
+        XCTAssertFalse(
+            FloatingBarController.startsNewSession(
+                from: .processing,
+                to: .done("ok", .pasted)
+            )
+        )
+    }
+
     func testPlacementKeepsEveryPresentationInsideTheVisibleFrame() {
         let visible = NSRect(x: -1_920, y: 0, width: 1_920, height: 1_080)
 
