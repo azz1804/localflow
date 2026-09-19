@@ -772,6 +772,8 @@ final class FloatingBarView: NSView {
     private var isSpectrumDismissing = false
     private let processingContainerLayer = CALayer()
     private var processingDotLayers: [CALayer] = []
+    private let processingSpinnerTrackLayer = CAShapeLayer()
+    private let processingSpinnerLayer = CAShapeLayer()
     private let orbContainerLayer = CALayer()
     private let orbClipLayer = CALayer()
     private let orbMaskLayer = CAShapeLayer()
@@ -895,6 +897,29 @@ final class FloatingBarView: NSView {
             processingContainerLayer.addSublayer(dotLayer)
             return dotLayer
         }
+
+        for spinnerLayer in [
+            processingSpinnerTrackLayer,
+            processingSpinnerLayer
+        ] {
+            spinnerLayer.fillColor = nil
+            spinnerLayer.lineWidth = 2.6
+            spinnerLayer.lineCap = .round
+            spinnerLayer.isHidden = true
+            spinnerLayer.actions = [
+                "bounds": NSNull(),
+                "hidden": NSNull(),
+                "opacity": NSNull(),
+                "path": NSNull(),
+                "position": NSNull(),
+                "strokeColor": NSNull(),
+                "transform": NSNull()
+            ]
+            processingContainerLayer.addSublayer(spinnerLayer)
+        }
+        processingSpinnerLayer.shadowOpacity = 0.55
+        processingSpinnerLayer.shadowRadius = 2.4
+        processingSpinnerLayer.shadowOffset = .zero
         applyProcessingTheme()
     }
 
@@ -1600,12 +1625,31 @@ final class FloatingBarView: NSView {
     private func updateProcessingIndicatorForCurrentStatus() {
         let shouldShow: Bool
         if case .processing = status {
-            shouldShow = !isSpectrumDismissing
-                && presentationMode != .compact
+            shouldShow = presentationMode == .compact
+                || !isSpectrumDismissing
         } else {
             shouldShow = false
         }
+        updateProcessingIndicatorStyle(isProcessing: shouldShow)
         setProcessingIndicatorVisible(shouldShow)
+    }
+
+    /// The bubble has no room for the dots, so it dims the orb and spins a
+    /// ring around it instead.
+    private func updateProcessingIndicatorStyle(isProcessing: Bool) {
+        let usesSpinner = presentationMode == .compact
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for dotLayer in processingDotLayers {
+            dotLayer.isHidden = usesSpinner
+        }
+        processingSpinnerTrackLayer.isHidden = !usesSpinner
+        processingSpinnerLayer.isHidden = !usesSpinner
+        orbContainerLayer.opacity = isProcessing && usesSpinner ? 0.42 : 1
+        if isProcessing, usesSpinner {
+            orbContainerLayer.transform = CATransform3DIdentity
+        }
+        CATransaction.commit()
     }
 
     private func setProcessingIndicatorVisible(_ visible: Bool) {
@@ -1617,6 +1661,7 @@ final class FloatingBarView: NSView {
             for dotLayer in processingDotLayers {
                 dotLayer.removeAnimation(forKey: "processingPulse")
             }
+            processingSpinnerLayer.removeAnimation(forKey: "processingSpin")
             return
         }
 
@@ -1665,6 +1710,18 @@ final class FloatingBarView: NSView {
             group.fillMode = .backwards
             dotLayer.add(group, forKey: "processingPulse")
         }
+
+        processingSpinnerLayer.removeAnimation(forKey: "processingSpin")
+        guard !reduceMotion else {
+            return
+        }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = 2 * Double.pi
+        spin.duration = 0.9
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        processingSpinnerLayer.add(spin, forKey: "processingSpin")
     }
 
     private func applyProcessingTheme() {
@@ -1675,6 +1732,15 @@ final class FloatingBarView: NSView {
                 .nsColor()
                 .cgColor
         }
+        processingSpinnerTrackLayer.strokeColor = NSColor.white
+            .withAlphaComponent(0.16)
+            .cgColor
+        processingSpinnerLayer.strokeColor = NSColor.white
+            .withAlphaComponent(0.96)
+            .cgColor
+        processingSpinnerLayer.shadowColor = orbTheme.highlight
+            .nsColor()
+            .cgColor
     }
 
     private func updateTargetEnvelope(
@@ -2053,6 +2119,43 @@ final class FloatingBarView: NSView {
                     y: cardRect.midY
                 )
             }
+        }
+
+        let spinnerSize: CGFloat = 40
+        let spinnerBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: spinnerSize,
+            height: spinnerSize
+        )
+        let spinnerCenter = CGPoint(
+            x: spinnerSize / 2,
+            y: spinnerSize / 2
+        )
+        let spinnerRadius = spinnerSize / 2 - 2
+        let trackPath = CGMutablePath()
+        trackPath.addEllipse(
+            in: spinnerBounds.insetBy(dx: 2, dy: 2)
+        )
+        let arcPath = CGMutablePath()
+        arcPath.addArc(
+            center: spinnerCenter,
+            radius: spinnerRadius,
+            startAngle: 0,
+            endAngle: .pi * 0.62,
+            clockwise: false
+        )
+        processingSpinnerTrackLayer.path = trackPath
+        processingSpinnerLayer.path = arcPath
+        for spinnerLayer in [
+            processingSpinnerTrackLayer,
+            processingSpinnerLayer
+        ] {
+            spinnerLayer.bounds = spinnerBounds
+            spinnerLayer.position = CGPoint(
+                x: cardRect.midX,
+                y: cardRect.midY
+            )
         }
 
         let orbSize: CGFloat

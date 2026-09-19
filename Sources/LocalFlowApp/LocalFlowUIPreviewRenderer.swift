@@ -134,6 +134,15 @@ enum LocalFlowUIPreviewRenderer {
         )
         try renderFloatingBar(
             hovered: false,
+            processing: true,
+            orbThemeOverride: "automatic",
+            presentation: .compact,
+            to: outputDirectory.appendingPathComponent(
+                "localflow-flowbar-compact-processing.png"
+            )
+        )
+        try renderFloatingBar(
+            hovered: false,
             outputMode: .prompt,
             orbThemeOverride: "plasma-orchid",
             presentation: .vertical,
