@@ -251,6 +251,54 @@ enum FloatingBarPlacement {
         }
     }
 
+    /// Carries a placement over to another screen. Near an edge the distance
+    /// to that edge is kept so a docked bar stays docked; around the middle
+    /// the relative position is kept so a centered bar stays centered.
+    static func translatedCenter(
+        _ center: NSPoint,
+        from source: NSRect,
+        to destination: NSRect
+    ) -> NSPoint {
+        NSPoint(
+            x: translatedCoordinate(
+                center.x,
+                sourceMinimum: source.minX,
+                sourceLength: source.width,
+                destinationMinimum: destination.minX,
+                destinationLength: destination.width
+            ),
+            y: translatedCoordinate(
+                center.y,
+                sourceMinimum: source.minY,
+                sourceLength: source.height,
+                destinationMinimum: destination.minY,
+                destinationLength: destination.height
+            )
+        )
+    }
+
+    private static func translatedCoordinate(
+        _ coordinate: CGFloat,
+        sourceMinimum: CGFloat,
+        sourceLength: CGFloat,
+        destinationMinimum: CGFloat,
+        destinationLength: CGFloat
+    ) -> CGFloat {
+        guard sourceLength > 0 else {
+            return destinationMinimum + destinationLength / 2
+        }
+        let offset = coordinate - sourceMinimum
+        let fraction = offset / sourceLength
+        if abs(fraction - 0.5) < 0.1 {
+            return destinationMinimum + fraction * destinationLength
+        }
+        if fraction < 0.5 {
+            return destinationMinimum + offset
+        }
+        return destinationMinimum + destinationLength
+            - (sourceLength - offset)
+    }
+
     private static func clampedCoordinate(
         _ coordinate: CGFloat,
         panelLength: CGFloat,
@@ -433,6 +481,7 @@ final class FloatingBarController {
     private var hideTask: Task<Void, Never>?
     private var presentationMode: FloatingBarPresentationMode = .horizontal
     private var hasPositionedPanel = false
+    private var lastStatus: AppStatus = .idle
     private let defaults = UserDefaults.standard
 
     private enum DefaultsKey {
@@ -484,11 +533,16 @@ final class FloatingBarController {
         )
 
         guard status.shouldShowFloatingBar else {
+            lastStatus = status
             hidePanel(animated: true)
             return
         }
 
         positionPanelIfNeeded()
+        if Self.startsNewSession(from: lastStatus, to: status) {
+            movePanelToPointerScreen()
+        }
+        lastStatus = status
         showPanel()
 
         if let dismissDelay = Self.dismissDelay(for: status) {
@@ -565,6 +619,59 @@ final class FloatingBarController {
             animated: false
         )
         hasPositionedPanel = true
+    }
+
+    /// The bar follows the pointer only when a session begins, so it never
+    /// jumps between screens in the middle of a dictation.
+    nonisolated static func startsNewSession(
+        from previous: AppStatus,
+        to next: AppStatus
+    ) -> Bool {
+        if !previous.shouldShowFloatingBar {
+            return next.shouldShowFloatingBar
+        }
+        if case .recording = next {
+            if case .recording = previous {
+                return false
+            }
+            return true
+        }
+        return false
+    }
+
+    private func movePanelToPointerScreen() {
+        let pointer = NSEvent.mouseLocation
+        guard let pointerScreen = NSScreen.screens.first(where: {
+            NSMouseInRect(pointer, $0.frame, false)
+        }) else {
+            return
+        }
+        let currentCenter = NSPoint(
+            x: panel.frame.midX,
+            y: panel.frame.midY
+        )
+        let destination = pointerScreen.visibleFrame
+        guard let source = visibleFrame(for: currentCenter),
+              source != destination else {
+            return
+        }
+        let center = FloatingBarPlacement.translatedCenter(
+            currentCenter,
+            from: source,
+            to: destination
+        )
+        let mode = presentationMode == .compact
+            ? FloatingBarPresentationMode.compact
+            : FloatingBarPlacement.expandedMode(
+                forCenter: center,
+                in: destination
+            )
+        setPresentationMode(
+            mode,
+            centeredAt: center,
+            in: destination,
+            animated: false
+        )
     }
 
     private func toggleCompactPresentation() {
